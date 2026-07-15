@@ -28,7 +28,7 @@ class TelegramBotApiClient(
     private val apiBaseUrl: HttpUrl = DEFAULT_API_BASE_URL,
     private val fileBaseUrl: HttpUrl = DEFAULT_FILE_BASE_URL,
     private val retryPolicy: RetryPolicy = RetryPolicy(),
-) {
+) : TelegramGateway {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -38,7 +38,7 @@ class TelegramBotApiClient(
         require(token.isNotBlank())
     }
 
-    suspend fun getMe(): BotIdentity {
+    override suspend fun getMe(): BotIdentity {
         val user = executeMethod<TelegramUserDto>(
             method = "getMe",
             body = emptyForm(),
@@ -51,7 +51,7 @@ class TelegramBotApiClient(
         )
     }
 
-    suspend fun getChat(chatId: Long): ChatInfo {
+    override suspend fun getChat(chatId: Long): ChatInfo {
         val chat = executeMethod<TelegramChatFullDto>(
             method = "getChat",
             body = form("chat_id" to chatId.toString()),
@@ -65,7 +65,7 @@ class TelegramBotApiClient(
         )
     }
 
-    suspend fun getChatMember(chatId: Long, userId: Long): ChatMemberInfo {
+    override suspend fun getChatMember(chatId: Long, userId: Long): ChatMemberInfo {
         val member = executeMethod<TelegramChatMemberDto>(
             method = "getChatMember",
             body = form("chat_id" to chatId.toString(), "user_id" to userId.toString()),
@@ -79,7 +79,7 @@ class TelegramBotApiClient(
         )
     }
 
-    suspend fun getUpdates(offset: Long? = null): List<ChannelUpdate> {
+    override suspend fun getUpdates(offset: Long?): List<ChannelUpdate> {
         val builder = FormBody.Builder()
             .add(
                 "allowed_updates",
@@ -103,7 +103,7 @@ class TelegramBotApiClient(
         }
     }
 
-    suspend fun sendMessage(chatId: Long, text: String): SentMessage {
+    override suspend fun sendMessage(chatId: Long, text: String): SentMessage {
         val message = executeMethod<TelegramMessageDto>(
             method = "sendMessage",
             body = form("chat_id" to chatId.toString(), "text" to text),
@@ -112,7 +112,7 @@ class TelegramBotApiClient(
         return SentMessage(messageId = message.messageId)
     }
 
-    suspend fun deleteMessage(chatId: Long, messageId: Long): Boolean =
+    override suspend fun deleteMessage(chatId: Long, messageId: Long): Boolean =
         executeMethod(
             method = "deleteMessage",
             body = form("chat_id" to chatId.toString(), "message_id" to messageId.toString()),
