@@ -1,3 +1,8 @@
+/*
+ * Initial implementation created with OpenAI Codex
+ * based on requirements provided by the project maintainer.
+ */
+
 package com.teledrive.lite.ui.theme
 
 import androidx.compose.foundation.isSystemInDarkTheme
