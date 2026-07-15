@@ -1,8 +1,11 @@
 package com.teledrive.lite.app
 
 import android.content.Context
+import com.teledrive.lite.database.TeleDriveDatabase
 import com.teledrive.lite.repository.ConnectionRepository
+import com.teledrive.lite.repository.FileRepository
 import com.teledrive.lite.repository.SetupConnectionService
+import com.teledrive.lite.repository.TransferRepository
 import com.teledrive.lite.settings.AtomicSetupStateStore
 import com.teledrive.lite.settings.KdfParametersStore
 import com.teledrive.lite.settings.KeystoreCipher
@@ -18,6 +21,10 @@ import com.teledrive.lite.telegram.TelegramBotApiClient
  */
 class AppContainer(context: Context) {
     val applicationContext: Context = context.applicationContext
+
+    val database: TeleDriveDatabase = TeleDriveDatabase.create(applicationContext)
+    val fileRepository = FileRepository(database)
+    val transferRepository = TransferRepository(database)
 
     private val secureValues = SharedPreferencesStringValueStore(
         applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
