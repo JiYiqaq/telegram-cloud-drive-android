@@ -71,6 +71,19 @@ class TelegramBotApiClientTest {
     }
 
     @Test
+    fun getChatMapsUsernameSoPublicChannelsCanBeRejected() = runBlocking {
+        server.enqueue(
+            jsonResponse(
+                """{"ok":true,"result":{"id":-1001234567890,"type":"channel","title":"Public Store","username":"public_store"}}""",
+            ),
+        )
+
+        val chat = newClient().getChat(CHAT_ID)
+
+        assertEquals("public_store", chat.username)
+    }
+
+    @Test
     fun getChatMemberMapsRequiredChannelAdministratorRights() = runBlocking {
         server.enqueue(
             jsonResponse(

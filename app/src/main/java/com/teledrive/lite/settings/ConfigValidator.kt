@@ -47,17 +47,13 @@ object ConfigValidator {
     ): ConfigValidationResult {
         val normalizedToken = botToken.trim()
         val normalizedChannelId = channelId.trim()
-        val parsedChannelId = normalizedChannelId.toLongOrNull()
+        val parsedChannelId = parsePrivateChannelId(normalizedChannelId)
         val errors = linkedSetOf<ConfigValidationError>()
 
-        if (!botTokenPattern.matches(normalizedToken)) {
+        if (!isBotTokenValid(normalizedToken)) {
             errors += ConfigValidationError.INVALID_BOT_TOKEN
         }
-        if (
-            parsedChannelId == null ||
-            parsedChannelId >= 0L ||
-            !privateChannelIdPattern.matches(normalizedChannelId)
-        ) {
+        if (parsedChannelId == null) {
             errors += ConfigValidationError.INVALID_CHANNEL_ID
         }
         when {
@@ -83,6 +79,14 @@ object ConfigValidator {
             errors = errors,
             passwordStrength = passwordStrength(password),
         )
+    }
+
+    fun isBotTokenValid(botToken: String): Boolean = botTokenPattern.matches(botToken.trim())
+
+    fun parsePrivateChannelId(channelId: String): Long? {
+        val normalized = channelId.trim()
+        val parsed = normalized.toLongOrNull() ?: return null
+        return parsed.takeIf { it < 0L && privateChannelIdPattern.matches(normalized) }
     }
 
     fun passwordStrength(password: String): PasswordStrength {

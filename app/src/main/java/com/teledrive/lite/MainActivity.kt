@@ -29,7 +29,9 @@ class MainActivity : ComponentActivity() {
                         .safeDrawingPadding(),
                     color = MaterialTheme.colorScheme.background,
                 ) {
-                    TeleDriveNavHost()
+                    TeleDriveNavHost(
+                        container = (application as TeleDriveApplication).container,
+                    )
                 }
             }
         }

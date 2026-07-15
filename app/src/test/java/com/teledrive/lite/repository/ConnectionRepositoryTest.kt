@@ -156,6 +156,7 @@ class ConnectionRepositoryTest {
                 ChannelUpdate(10L, 1L, CHANNEL_ID, "Private Store"),
                 ChannelUpdate(11L, 2L, CHANNEL_ID, "Private Store"),
                 ChannelUpdate(12L, 3L, -1007777777777L, "Archive"),
+                ChannelUpdate(13L, 4L, -1008888888888L, "Public", "public_channel"),
             ),
         )
         val repository = repository(gateway)
@@ -166,6 +167,27 @@ class ConnectionRepositoryTest {
         assertEquals(CHANNEL_ID, candidates.first().channelId)
         assertFalse(candidates.first().toString().contains(CHANNEL_ID.toString()))
         assertEquals(listOf("getUpdates:9"), gateway.calls)
+    }
+
+    @Test
+    fun publicChannelIsRejectedBeforePermissionOrPostingChecks() = runBlocking {
+        val gateway = FakeTelegramGateway(
+            chat = ChatInfo(
+                id = CHANNEL_ID,
+                type = "channel",
+                title = "Public Store",
+                pinnedMessage = null,
+                username = "public_store",
+            ),
+        )
+        val repository = repository(gateway)
+
+        val error = assertThrows(ConnectionException::class.java) {
+            runBlocking { repository.testChannel(dummyToken(), CHANNEL_ID) }
+        }
+
+        assertEquals(ConnectionFailure.NOT_A_PRIVATE_CHANNEL, error.failure)
+        assertEquals(listOf("getMe", "getChat:$CHANNEL_ID"), gateway.calls)
     }
 
     @Test

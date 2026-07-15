@@ -11,6 +11,7 @@ data class ChatInfo(
     val type: String,
     val title: String?,
     val pinnedMessage: TelegramMessage?,
+    val username: String? = null,
 )
 
 data class TelegramMessage(
@@ -41,6 +42,7 @@ data class ChannelUpdate(
     val messageId: Long,
     val chatId: Long,
     val chatTitle: String?,
+    val chatUsername: String? = null,
 )
 
 data class SentMessage(

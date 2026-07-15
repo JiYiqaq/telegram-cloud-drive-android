@@ -6,20 +6,31 @@
 package com.teledrive.lite.navigation
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.remember
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
-import com.teledrive.lite.ui.setup.SetupScreen
+import androidx.lifecycle.viewmodel.compose.viewModel
+import com.teledrive.lite.app.AppContainer
+import com.teledrive.lite.ui.home.HomeScreen
+import com.teledrive.lite.ui.setup.SetupRoute
+import com.teledrive.lite.ui.setup.SetupViewModel
+import com.teledrive.lite.ui.setup.SetupViewModelFactory
 import com.teledrive.lite.ui.splash.SplashScreen
+import com.teledrive.lite.ui.tutorial.TutorialScreen
 
 @Composable
 fun TeleDriveNavHost(
+    container: AppContainer,
     navController: NavHostController = rememberNavController(),
 ) {
+    val startDestination = remember(container) {
+        Routes.initialRoute(container.isSetupComplete())
+    }
     NavHost(
         navController = navController,
-        startDestination = Routes.Splash,
+        startDestination = startDestination,
     ) {
         composable(Routes.Splash) {
             SplashScreen(
@@ -31,7 +42,27 @@ fun TeleDriveNavHost(
             )
         }
         composable(Routes.Setup) {
-            SetupScreen()
+            val setupViewModel: SetupViewModel = viewModel(
+                factory = SetupViewModelFactory(
+                    connectionService = container.setupConnectionService,
+                    initializationService = container.setupInitializationService,
+                ),
+            )
+            SetupRoute(
+                viewModel = setupViewModel,
+                onOpenHelp = { navController.navigate(Routes.Tutorial) },
+                onSetupComplete = {
+                    navController.navigate(Routes.Home) {
+                        popUpTo(Routes.Setup) { inclusive = true }
+                    }
+                },
+            )
+        }
+        composable(Routes.Tutorial) {
+            TutorialScreen(onBack = navController::popBackStack)
+        }
+        composable(Routes.Home) {
+            HomeScreen()
         }
     }
 }

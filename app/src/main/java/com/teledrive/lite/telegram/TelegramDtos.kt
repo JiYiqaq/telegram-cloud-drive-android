@@ -32,6 +32,7 @@ internal data class TelegramBasicChatDto(
     val id: Long,
     val type: String,
     val title: String? = null,
+    val username: String? = null,
 )
 
 @Serializable
@@ -39,6 +40,7 @@ internal data class TelegramChatFullDto(
     val id: Long,
     val type: String,
     val title: String? = null,
+    val username: String? = null,
     @SerialName("pinned_message") val pinnedMessage: TelegramMessageDto? = null,
 )
 

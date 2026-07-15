@@ -12,12 +12,20 @@ class SecureStorageException(
     val failure: SecureStorageFailure,
 ) : IllegalStateException(failure.safeMessage)
 
+interface SecureConfigPersistence {
+    fun save(config: ValidatedConnectionConfig)
+
+    fun load(): ValidatedConnectionConfig?
+
+    fun clear()
+}
+
 class SecureConfigStore(
     private val values: StringValueStore,
     private val cipher: SecretCipher,
-) {
+) : SecureConfigPersistence {
     @Synchronized
-    fun save(config: ValidatedConnectionConfig) {
+    override fun save(config: ValidatedConnectionConfig) {
         val tokenBytes = config.botToken.encodeToByteArray()
         val channelIdBytes = config.channelId.toString().encodeToByteArray()
         var encryptedToken: ByteArray? = null
@@ -45,7 +53,7 @@ class SecureConfigStore(
     }
 
     @Synchronized
-    fun load(): ValidatedConnectionConfig? {
+    override fun load(): ValidatedConnectionConfig? {
         val encodedToken = values.get(TOKEN_KEY)
         val encodedChannelId = values.get(CHANNEL_ID_KEY)
         if (encodedToken == null && encodedChannelId == null) return null
@@ -80,7 +88,7 @@ class SecureConfigStore(
     }
 
     @Synchronized
-    fun clear() {
+    override fun clear() {
         var failed = false
         try {
             failed = !values.remove(setOf(TOKEN_KEY, CHANNEL_ID_KEY))
@@ -98,8 +106,8 @@ class SecureConfigStore(
     companion object {
         internal const val TOKEN_KEY = "encrypted_bot_token"
         internal const val CHANNEL_ID_KEY = "encrypted_channel_id"
-        private val TOKEN_AAD = "teledrive.config.bot-token.v1".encodeToByteArray()
-        private val CHANNEL_ID_AAD = "teledrive.config.channel-id.v1".encodeToByteArray()
+        internal val TOKEN_AAD = "teledrive.config.bot-token.v1".encodeToByteArray()
+        internal val CHANNEL_ID_AAD = "teledrive.config.channel-id.v1".encodeToByteArray()
     }
 }
 

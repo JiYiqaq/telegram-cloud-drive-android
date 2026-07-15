@@ -31,11 +31,20 @@ data class DetectedChannel(
         "DetectedChannel(channelId=[REDACTED], title=$title)"
 }
 
+interface SetupConnectionService {
+    suspend fun testBot(token: String): BotConnectionResult
+
+    suspend fun testChannel(token: String, channelId: Long): ChannelConnectionResult
+
+    suspend fun detectChannels(token: String, offset: Long? = null): List<DetectedChannel>
+}
+
 enum class ConnectionFailure(val chineseMessage: String) {
     INVALID_BOT_TOKEN("机器人 Token 无效，请检查后重试。"),
     NETWORK_UNAVAILABLE("无法连接 Telegram，请检查网络后重试。"),
     TELEGRAM_REQUEST_FAILED("Telegram 请求失败，请稍后重试。"),
     NOT_A_CHANNEL("该 Chat ID 不是频道，请使用私人频道的 Chat ID。"),
+    NOT_A_PRIVATE_CHANNEL("该频道是公开频道，请改用没有公开用户名的私人频道。"),
     BOT_NOT_ADMINISTRATOR("机器人不是频道管理员。"),
     MISSING_POST_PERMISSION("机器人缺少发送消息权限。"),
     MISSING_EDIT_PERMISSION("机器人缺少置顶或编辑消息权限。"),
@@ -49,8 +58,8 @@ class ConnectionException(
 
 class ConnectionRepository(
     private val clientFactory: TelegramGatewayFactory,
-) {
-    suspend fun testBot(token: String): BotConnectionResult = safely {
+) : SetupConnectionService {
+    override suspend fun testBot(token: String): BotConnectionResult = safely {
         val bot = clientFactory.create(token).getMe()
         BotConnectionResult(
             displayName = bot.displayName,
@@ -58,12 +67,15 @@ class ConnectionRepository(
         )
     }
 
-    suspend fun testChannel(token: String, channelId: Long): ChannelConnectionResult = safely {
+    override suspend fun testChannel(token: String, channelId: Long): ChannelConnectionResult = safely {
         val gateway = clientFactory.create(token)
         val bot = gateway.getMe()
         val chat = gateway.getChat(channelId)
         if (chat.type != CHANNEL_TYPE) {
             throw ConnectionException(ConnectionFailure.NOT_A_CHANNEL)
+        }
+        if (chat.username != null) {
+            throw ConnectionException(ConnectionFailure.NOT_A_PRIVATE_CHANNEL)
         }
         validatePermissions(gateway.getChatMember(channelId, bot.id))
 
@@ -81,12 +93,13 @@ class ConnectionRepository(
         ChannelConnectionResult(channelId = chat.id, title = chat.title)
     }
 
-    suspend fun detectChannels(
+    override suspend fun detectChannels(
         token: String,
-        offset: Long? = null,
+        offset: Long?,
     ): List<DetectedChannel> = safely {
         clientFactory.create(token)
             .getUpdates(offset)
+            .filter { it.chatUsername == null }
             .distinctBy { it.chatId }
             .map { update ->
                 DetectedChannel(

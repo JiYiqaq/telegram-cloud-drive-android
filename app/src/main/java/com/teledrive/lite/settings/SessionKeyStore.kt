@@ -1,11 +1,19 @@
 package com.teledrive.lite.settings
 
+interface SessionKeyPersistence {
+    fun save(masterKey: ByteArray)
+
+    fun load(): ByteArray?
+
+    fun clear()
+}
+
 class SessionKeyStore(
     private val values: StringValueStore,
     private val cipher: SecretCipher,
-) {
+) : SessionKeyPersistence {
     @Synchronized
-    fun save(masterKey: ByteArray) {
+    override fun save(masterKey: ByteArray) {
         require(masterKey.size == MASTER_KEY_BYTES)
         var encrypted: ByteArray? = null
         try {
@@ -23,7 +31,7 @@ class SessionKeyStore(
     }
 
     @Synchronized
-    fun load(): ByteArray? {
+    override fun load(): ByteArray? {
         val encoded = values.get(SESSION_KEY) ?: return null
         var encrypted: ByteArray? = null
         return try {
@@ -44,7 +52,7 @@ class SessionKeyStore(
     }
 
     @Synchronized
-    fun clear() {
+    override fun clear() {
         var failed = false
         try {
             failed = !values.remove(setOf(SESSION_KEY))
@@ -62,6 +70,6 @@ class SessionKeyStore(
     companion object {
         const val MASTER_KEY_BYTES: Int = 32
         internal const val SESSION_KEY = "encrypted_session_master_key"
-        private val SESSION_KEY_AAD = "teledrive.session.master-key.v1".encodeToByteArray()
+        internal val SESSION_KEY_AAD = "teledrive.session.master-key.v1".encodeToByteArray()
     }
 }

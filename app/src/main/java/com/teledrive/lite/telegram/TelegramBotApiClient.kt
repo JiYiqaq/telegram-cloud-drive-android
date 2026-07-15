@@ -62,6 +62,7 @@ class TelegramBotApiClient(
             type = chat.type,
             title = chat.title,
             pinnedMessage = chat.pinnedMessage?.toDomain(),
+            username = chat.username,
         )
     }
 
@@ -99,6 +100,7 @@ class TelegramBotApiClient(
                 messageId = post.messageId,
                 chatId = post.chat.id,
                 chatTitle = post.chat.title,
+                chatUsername = post.chat.username,
             )
         }
     }
