@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="teledrive_light_surface">#F6FAFB</color>
+    <color name="teledrive_dark_surface">#061925</color>
+    <color name="teledrive_teal">#0B8178</color>
+    <color name="ic_launcher_background">#0B2639</color>
+    <color name="ic_launcher_background_accent">#16485A</color>
+</resources>

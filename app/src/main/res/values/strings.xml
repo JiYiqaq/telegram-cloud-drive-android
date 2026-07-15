@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">TeleDrive Lite</string>
+    <string name="app_mark">T</string>
+    <string name="splash_tagline">安全保存，随时取回</string>
+    <string name="start_setup">开始设置</string>
+    <string name="setup_title">首次设置</string>
+    <string name="setup_description">连接 Telegram Bot 和私人频道前，请准备好 Bot Token、频道 ID 和同步密码。</string>
+    <string name="setup_security_title">加密提醒</string>
+    <string name="setup_security_note">同步密码无法找回，请妥善保管。文件会在本机加密后再上传。</string>
+    <string name="setup_placeholder">当前为项目基础界面，完整配置向导将在后续任务中启用。</string>
+</resources>

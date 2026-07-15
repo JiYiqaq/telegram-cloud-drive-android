@@ -1,0 +1,61 @@
+# Android Studio and IntelliJ IDEA
+*.iml
+.idea/
+.idea/**
+!.idea/codeStyles/
+!.idea/codeStyles/**
+!.idea/inspectionProfiles/
+!.idea/inspectionProfiles/**
+
+# Gradle and Kotlin
+.gradle/
+.kotlin/
+build/
+**/build/
+kotlin-js-store/
+
+# Local SDK and machine-specific configuration
+local.properties
+gradle-app.setting
+
+# Android build artifacts
+*.apk
+*.ap_
+*.aab
+*.aar
+*.dex
+*.class
+captures/
+lint-results*.html
+lint-results*.xml
+
+# Native build artifacts
+.externalNativeBuild/
+.cxx/
+obj/
+
+# Signing material and secrets
+*.jks
+*.keystore
+keystore.properties
+signing.properties
+secrets.properties
+google-services.json
+.env
+.env.*
+!.env.example
+
+# Logs and crash reports
+*.log
+hs_err_pid*
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Temporary and editor files
+*.swp
+*.swo
+*~
+.vscode/
