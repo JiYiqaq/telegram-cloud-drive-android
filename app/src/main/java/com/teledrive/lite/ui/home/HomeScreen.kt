@@ -19,15 +19,20 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -83,6 +88,7 @@ fun HomeRoute(
     var pendingRename by remember { mutableStateOf<DirectoryEntry?>(null) }
     var selectedEntries by remember { mutableStateOf<Map<String, DirectoryEntry>>(emptyMap()) }
     var creatingFolder by remember { mutableStateOf(false) }
+    var batchMode by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     val downloadDestination = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*"),
@@ -107,6 +113,7 @@ fun HomeRoute(
     }
     LaunchedEffect(directory?.folderId, searchQuery) {
         selectedEntries = emptyMap()
+        batchMode = false
     }
     pendingDeletions?.let { entries ->
         AlertDialog(
@@ -126,8 +133,10 @@ fun HomeRoute(
                     onClick = {
                         pendingDeletions = null
                         selectedEntries = emptyMap()
+                        batchMode = false
                         viewModel.deleteEntries(entries)
                     },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
                 ) { Text(stringResource(R.string.delete)) }
             },
             dismissButton = {
@@ -232,7 +241,11 @@ fun HomeRoute(
             pendingRename = it
             nameInput = it.name
         },
-        selectionEnabled = searchQuery.isBlank(),
+        selectionEnabled = batchMode && searchQuery.isBlank(),
+        onToggleBatchMode = {
+            batchMode = !batchMode
+            selectedEntries = emptyMap()
+        },
         selectedEntryIds = selectedEntries.keys,
         onToggleSelection = { entry ->
             selectedEntries = selectedEntries.toMutableMap().apply {
@@ -280,6 +293,7 @@ fun HomeScreen(
     onCreateFolder: () -> Unit,
     onRename: (DirectoryEntry) -> Unit,
     selectionEnabled: Boolean,
+    onToggleBatchMode: () -> Unit,
     selectedEntryIds: Set<String>,
     onToggleSelection: (DirectoryEntry) -> Unit,
     onSelectAll: () -> Unit,
@@ -301,15 +315,14 @@ fun HomeScreen(
                     if (breadcrumbs.size > 1) TextButton(onClick = onNavigateUp) { Text("上级") }
                 },
                 actions = {
-                    TextButton(onClick = onCreateFolder) { Text("新建") }
                     TextButton(onClick = onOpenSettings) { Text("设置") }
                 },
             )
         },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            FloatingActionButton(onClick = onAddFile) {
-                Text(stringResource(R.string.add_file_symbol))
+            ExtendedFloatingActionButton(onClick = onAddFile) {
+                Text(stringResource(R.string.upload_files))
             }
         },
     ) { padding ->
@@ -330,6 +343,9 @@ fun HomeScreen(
                         breadcrumbs.joinToString(" / ") { it.second }.ifBlank { "我的云盘" },
                         style = MaterialTheme.typography.titleSmall,
                     )
+                }
+                item {
+                    HomeQuickActions(onAddFile = onAddFile, onCreateFolder = onCreateFolder)
                 }
                 item {
                     OutlinedTextField(
@@ -359,6 +375,19 @@ fun HomeScreen(
                         }
                     }
                 }
+                if (isEnqueueing) {
+                    item {
+                        Card(colors = CardDefaults.cardColors(MaterialTheme.colorScheme.secondaryContainer)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth().padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(modifier = Modifier.padding(end = 12.dp))
+                                Text(stringResource(R.string.enqueueing_upload))
+                            }
+                        }
+                    }
+                }
                 if (transfers.isNotEmpty()) {
                     item {
                         Text(
@@ -384,11 +413,16 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Text(
-                            stringResource(R.string.files_label),
+                            stringResource(R.string.files_count, entries.size),
                             style = MaterialTheme.typography.titleMedium,
                         )
-                        if (selectionEnabled && entries.isNotEmpty()) {
-                            TextButton(onClick = onSelectAll) { Text("全选") }
+                        if (searchQuery.isBlank() && entries.isNotEmpty()) {
+                            TextButton(onClick = onToggleBatchMode) {
+                                Text(stringResource(if (selectionEnabled) R.string.batch_done else R.string.batch_manage))
+                            }
+                        }
+                        if (selectionEnabled) {
+                            TextButton(onClick = onSelectAll) { Text(stringResource(R.string.select_all)) }
                         }
                     }
                 }
@@ -402,7 +436,10 @@ fun HomeScreen(
                                     horizontalArrangement = Arrangement.End,
                                 ) {
                                     TextButton(onClick = onBatchMove) { Text("移动") }
-                                    TextButton(onClick = onBatchDelete) { Text("删除") }
+                                    TextButton(
+                                        onClick = onBatchDelete,
+                                        colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
+                                    ) { Text(stringResource(R.string.delete)) }
                                     TextButton(onClick = onClearSelection) { Text("清除") }
                                 }
                             }
@@ -411,10 +448,7 @@ fun HomeScreen(
                 }
                 if (entries.isEmpty()) {
                     item {
-                        Text(
-                            stringResource(R.string.home_empty),
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+                        EmptyDirectoryCard(searching = searchQuery.isNotBlank(), onAddFile = onAddFile)
                     }
                 } else {
                     items(entries, key = { "entry:${it.id}" }) { entry ->
@@ -432,19 +466,67 @@ fun HomeScreen(
                         )
                     }
                 }
-                if (isEnqueueing) {
-                    item {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            CircularProgressIndicator(modifier = Modifier.padding(8.dp))
-                            Text(stringResource(R.string.enqueueing_upload))
-                        }
-                    }
-                }
             }
         }
     }
 }
 
+@Composable
+private fun HomeQuickActions(
+    onAddFile: () -> Unit,
+    onCreateFolder: () -> Unit,
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer),
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Text(
+                stringResource(R.string.file_actions_title),
+                style = MaterialTheme.typography.titleMedium,
+            )
+            Text(
+                stringResource(R.string.file_actions_description),
+                color = MaterialTheme.colorScheme.onSecondaryContainer,
+            )
+            Button(onClick = onAddFile, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.upload_files))
+            }
+            OutlinedButton(onClick = onCreateFolder, modifier = Modifier.fillMaxWidth()) {
+                Text(stringResource(R.string.create_folder))
+            }
+        }
+    }
+}
+
+@Composable
+private fun EmptyDirectoryCard(searching: Boolean, onAddFile: () -> Unit) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(
+            modifier = Modifier.fillMaxWidth().padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            if (searching) {
+                Text(stringResource(R.string.search_empty))
+            } else {
+                Text(
+                    stringResource(R.string.empty_folder_title),
+                    style = MaterialTheme.typography.titleMedium,
+                )
+                Text(
+                    stringResource(R.string.empty_folder_description),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                FilledTonalButton(onClick = onAddFile) {
+                    Text(stringResource(R.string.upload_first_file))
+                }
+            }
+        }
+    }
+}
 @Composable
 private fun EntryCard(
     entry: DirectoryEntry,
@@ -470,8 +552,14 @@ private fun EntryCard(
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = opens) {
-                if (entry.kind == EntryKind.FOLDER) onOpenFolder(entry.id) else onDownload(entry)
+            .clickable(enabled = selectionEnabled || opens) {
+                if (selectionEnabled) {
+                    onToggleSelection(entry)
+                } else if (entry.kind == EntryKind.FOLDER) {
+                    onOpenFolder(entry.id)
+                } else {
+                    onDownload(entry)
+                }
             },
     ) {
         Column(Modifier.padding(16.dp)) {
@@ -493,9 +581,13 @@ private fun EntryCard(
                 if (entry.kind == EntryKind.FOLDER) {
                     stringResource(R.string.folder_label)
                 } else {
-                    entry.fileStatus?.name.orEmpty()
+                    entry.fileStatus?.let(HomePresentation::fileStatusLabel).orEmpty()
                 },
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = if (entry.fileStatus in setOf(
+                        FileStatus.FAILED,
+                        FileStatus.PARTIALLY_DELETED,
+                        FileStatus.CORRUPTED,
+                    )) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             if (entry.kind == EntryKind.FILE) {
                 val context = LocalContext.current
@@ -512,29 +604,18 @@ private fun EntryCard(
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (entry.kind == EntryKind.FILE && deletable) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { onOpenFileDetail(entry) }) { Text("详情") }
-                    TextButton(onClick = { onRename(entry) }) { Text("重命名") }
-                    TextButton(onClick = { onMove(entry) }) { Text("移动") }
-                    TextButton(onClick = { onDelete(entry) }) {
-                        Text(
-                            stringResource(
-                                if (entry.fileStatus == FileStatus.PARTIALLY_DELETED) {
-                                    R.string.retry_safe_delete
-                                } else {
-                                    R.string.delete
-                                },
-                            ),
-                        )
-                    }
-                }
-            } else if (entry.kind == EntryKind.FOLDER) {
-                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { onRename(entry) }) { Text("重命名") }
-                    TextButton(onClick = { onMove(entry) }) { Text("移动") }
-                    TextButton(onClick = { onDelete(entry) }) { Text("删除") }
-                }
+            if (!selectionEnabled) {
+                HomeEntryActions(
+                    entry = entry,
+                    downloadable = downloadable,
+                    deletable = deletable,
+                    onDownload = onDownload,
+                    onOpenFolder = onOpenFolder,
+                    onOpenFileDetail = onOpenFileDetail,
+                    onRename = onRename,
+                    onMove = onMove,
+                    onDelete = onDelete,
+                )
             }
         }
     }
@@ -598,7 +679,10 @@ private fun TransferCard(
         ) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                 Text(task.fileNameSnapshot, style = MaterialTheme.typography.titleSmall)
-                Text(task.status.name)
+                Text(
+                    "${HomePresentation.transferTypeLabel(task.type)} · " +
+                        HomePresentation.transferStatusLabel(task.status),
+                )
             }
             LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
             Text(
