@@ -2,6 +2,18 @@
 
 All notable changes follow semantic versioning. This project is pre-release software.
 
+## [0.1.2-alpha] - 2026-07-17
+
+### Changed
+
+- Redesigned the home screen around explicit upload, folder, batch, and per-entry actions
+- Added clear Chinese file and transfer status labels with a guided empty state
+
+### Fixed
+
+- Hide files immediately after safe deletion is accepted while keeping partial failures recoverable
+- Return precise deletion success, folder-queue, and partial-failure feedback
+
 ## [0.1.1-alpha] - 2026-07-16
 
 ### Changed
