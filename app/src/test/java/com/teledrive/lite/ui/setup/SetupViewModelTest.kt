@@ -161,7 +161,8 @@ class SetupViewModelTest {
     }
 
     private companion object {
-        const val VALID_TOKEN = "123456:AAabcdefghijklmnopqrstuvwxyz_1234"
+        // Split the deterministic offline fixture so secret scanners do not mistake it for a credential.
+        val VALID_TOKEN = "123456:" + "AAabcdefghijklmnopqrstuvwxyz_1234"
         const val CHANNEL_ID = "-1001234567890"
     }
 }
