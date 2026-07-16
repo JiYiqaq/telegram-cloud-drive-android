@@ -13,11 +13,13 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -48,6 +50,7 @@ import com.teledrive.lite.database.TransferTaskEntity
 import com.teledrive.lite.model.DirectoryEntry
 import com.teledrive.lite.model.EntryKind
 import com.teledrive.lite.model.FileStatus
+import com.teledrive.lite.model.MoveTarget
 import com.teledrive.lite.model.TransferType
 import com.teledrive.lite.model.SortMode
 import com.teledrive.lite.model.SortDirection
@@ -75,8 +78,10 @@ fun HomeRoute(
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var pendingDownload by remember { mutableStateOf<DirectoryEntry?>(null) }
-    var pendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var pendingDeletions by remember { mutableStateOf<List<DirectoryEntry>?>(null) }
+    var pendingMove by remember { mutableStateOf<List<DirectoryEntry>?>(null) }
     var pendingRename by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var selectedEntries by remember { mutableStateOf<Map<String, DirectoryEntry>>(emptyMap()) }
     var creatingFolder by remember { mutableStateOf(false) }
     var nameInput by remember { mutableStateOf("") }
     val downloadDestination = rememberLauncherForActivityResult(
@@ -100,24 +105,48 @@ fun HomeRoute(
             viewModel.consumeMessage()
         }
     }
-    pendingDeletion?.let { entry ->
+    LaunchedEffect(directory?.folderId, searchQuery) {
+        selectedEntries = emptyMap()
+    }
+    pendingDeletions?.let { entries ->
         AlertDialog(
-            onDismissRequest = { pendingDeletion = null },
+            onDismissRequest = { pendingDeletions = null },
             title = { Text(stringResource(R.string.confirm_delete_title)) },
-            text = { Text(stringResource(R.string.confirm_delete_message, entry.name)) },
+            text = {
+                Text(
+                    if (entries.size == 1) {
+                        stringResource(R.string.confirm_delete_message, entries.single().name)
+                    } else {
+                        "将安全删除所选 ${entries.size} 项。非空文件夹会递归删除，其中的远端分块也会逐项处理。"
+                    },
+                )
+            },
             confirmButton = {
                 TextButton(
                     onClick = {
-                        pendingDeletion = null
-                        viewModel.deleteEntry(entry)
+                        pendingDeletions = null
+                        selectedEntries = emptyMap()
+                        viewModel.deleteEntries(entries)
                     },
                 ) { Text(stringResource(R.string.delete)) }
             },
             dismissButton = {
-                TextButton(onClick = { pendingDeletion = null }) {
+                TextButton(onClick = { pendingDeletions = null }) {
                     Text(stringResource(R.string.cancel))
                 }
             },
+        )
+    }
+    pendingMove?.let { entries ->
+        MoveTargetDialog(
+            itemCount = entries.size,
+            targets = viewModel.availableMoveTargets(entries),
+            onMove = { targetId ->
+                pendingMove = null
+                selectedEntries = emptyMap()
+                viewModel.moveEntries(entries, targetId)
+            },
+            onDismiss = { pendingMove = null },
         )
     }
     if (creatingFolder || pendingRename != null) {
@@ -189,7 +218,7 @@ fun HomeRoute(
         },
         onCancelDownload = viewModel::cancelDownload,
         onRetryDownload = viewModel::retryDownload,
-        onDelete = { pendingDeletion = it },
+        onDelete = { pendingDeletions = listOf(it) },
         onOpenFolder = viewModel::openFolder,
         onNavigateUp = viewModel::navigateUp,
         onSearchQueryChange = viewModel::setSearchQuery,
@@ -203,7 +232,20 @@ fun HomeRoute(
             pendingRename = it
             nameInput = it.name
         },
-        onMoveToRoot = viewModel::moveEntryToRoot,
+        selectionEnabled = searchQuery.isBlank(),
+        selectedEntryIds = selectedEntries.keys,
+        onToggleSelection = { entry ->
+            selectedEntries = selectedEntries.toMutableMap().apply {
+                if (remove(entry.id) == null) put(entry.id, entry)
+            }
+        },
+        onSelectAll = {
+            selectedEntries = directory?.entries.orEmpty().associateBy(DirectoryEntry::id)
+        },
+        onClearSelection = { selectedEntries = emptyMap() },
+        onBatchMove = { pendingMove = selectedEntries.values.toList() },
+        onBatchDelete = { pendingDeletions = selectedEntries.values.toList() },
+        onMove = { pendingMove = listOf(it) },
         onOpenFileDetail = { onOpenFileDetail(it.id) },
         snackbarHostState = snackbarHostState,
         onOpenSettings = onOpenSettings,
@@ -237,7 +279,14 @@ fun HomeScreen(
     onToggleSortDirection: () -> Unit,
     onCreateFolder: () -> Unit,
     onRename: (DirectoryEntry) -> Unit,
-    onMoveToRoot: (DirectoryEntry) -> Unit,
+    selectionEnabled: Boolean,
+    selectedEntryIds: Set<String>,
+    onToggleSelection: (DirectoryEntry) -> Unit,
+    onSelectAll: () -> Unit,
+    onClearSelection: () -> Unit,
+    onBatchMove: () -> Unit,
+    onBatchDelete: () -> Unit,
+    onMove: (DirectoryEntry) -> Unit,
     onOpenFileDetail: (DirectoryEntry) -> Unit,
     snackbarHostState: SnackbarHostState,
     onOpenSettings: () -> Unit,
@@ -329,10 +378,36 @@ fun HomeScreen(
                     }
                 }
                 item {
-                    Text(
-                        stringResource(R.string.files_label),
-                        style = MaterialTheme.typography.titleMedium,
-                    )
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Text(
+                            stringResource(R.string.files_label),
+                            style = MaterialTheme.typography.titleMedium,
+                        )
+                        if (selectionEnabled && entries.isNotEmpty()) {
+                            TextButton(onClick = onSelectAll) { Text("全选") }
+                        }
+                    }
+                }
+                if (selectionEnabled && selectedEntryIds.isNotEmpty()) {
+                    item {
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(12.dp)) {
+                                Text("已选择 ${selectedEntryIds.size} 项")
+                                Row(
+                                    Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.End,
+                                ) {
+                                    TextButton(onClick = onBatchMove) { Text("移动") }
+                                    TextButton(onClick = onBatchDelete) { Text("删除") }
+                                    TextButton(onClick = onClearSelection) { Text("清除") }
+                                }
+                            }
+                        }
+                    }
                 }
                 if (entries.isEmpty()) {
                     item {
@@ -349,9 +424,11 @@ fun HomeScreen(
                             onDelete,
                             onOpenFolder,
                             onRename,
-                            onMoveToRoot,
+                            onMove,
                             onOpenFileDetail,
-                            breadcrumbs.size > 1,
+                            selectionEnabled,
+                            entry.id in selectedEntryIds,
+                            onToggleSelection,
                         )
                     }
                 }
@@ -375,9 +452,11 @@ private fun EntryCard(
     onDelete: (DirectoryEntry) -> Unit,
     onOpenFolder: (String) -> Unit,
     onRename: (DirectoryEntry) -> Unit,
-    onMoveToRoot: (DirectoryEntry) -> Unit,
+    onMove: (DirectoryEntry) -> Unit,
     onOpenFileDetail: (DirectoryEntry) -> Unit,
-    canMoveToRoot: Boolean,
+    selectionEnabled: Boolean,
+    selected: Boolean,
+    onToggleSelection: (DirectoryEntry) -> Unit,
 ) {
     val downloadable = entry.kind == EntryKind.FILE &&
         entry.fileStatus in setOf(FileStatus.AVAILABLE, FileStatus.CORRUPTED)
@@ -396,6 +475,19 @@ private fun EntryCard(
             },
     ) {
         Column(Modifier.padding(16.dp)) {
+            if (selectionEnabled) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text("选择")
+                    Checkbox(
+                        checked = selected,
+                        onCheckedChange = { onToggleSelection(entry) },
+                    )
+                }
+            }
             Text(entry.name, style = MaterialTheme.typography.titleSmall)
             Text(
                 if (entry.kind == EntryKind.FOLDER) {
@@ -424,9 +516,7 @@ private fun EntryCard(
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { onOpenFileDetail(entry) }) { Text("详情") }
                     TextButton(onClick = { onRename(entry) }) { Text("重命名") }
-                    if (canMoveToRoot) {
-                        TextButton(onClick = { onMoveToRoot(entry) }) { Text("移到根目录") }
-                    }
+                    TextButton(onClick = { onMove(entry) }) { Text("移动") }
                     TextButton(onClick = { onDelete(entry) }) {
                         Text(
                             stringResource(
@@ -442,14 +532,48 @@ private fun EntryCard(
             } else if (entry.kind == EntryKind.FOLDER) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = { onRename(entry) }) { Text("重命名") }
-                    if (canMoveToRoot) {
-                        TextButton(onClick = { onMoveToRoot(entry) }) { Text("移到根目录") }
-                    }
+                    TextButton(onClick = { onMove(entry) }) { Text("移动") }
                     TextButton(onClick = { onDelete(entry) }) { Text("删除") }
                 }
             }
         }
     }
+}
+
+@Composable
+private fun MoveTargetDialog(
+    itemCount: Int,
+    targets: List<MoveTarget>,
+    onMove: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("移动 $itemCount 项到") },
+        text = {
+            if (targets.isEmpty()) {
+                Text("没有可用的目标文件夹")
+            } else {
+                LazyColumn(
+                    modifier = Modifier.heightIn(max = 360.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    items(targets, key = MoveTarget::id) { target ->
+                        TextButton(
+                            onClick = { onMove(target.id) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) {
+                            Text(target.path, modifier = Modifier.fillMaxWidth())
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {},
+        dismissButton = {
+            TextButton(onClick = onDismiss) { Text("取消") }
+        },
+    )
 }
 
 @Composable

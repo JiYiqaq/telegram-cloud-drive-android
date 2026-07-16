@@ -13,6 +13,7 @@ import com.teledrive.lite.model.DirectoryEntry
 import com.teledrive.lite.model.DirectorySnapshot
 import com.teledrive.lite.model.EntryKind
 import com.teledrive.lite.model.FileStatus
+import com.teledrive.lite.model.FolderDescriptor
 import com.teledrive.lite.model.FolderNode
 import com.teledrive.lite.model.IndexSyncStatus
 import com.teledrive.lite.model.PendingOperationStatus
@@ -23,6 +24,7 @@ import java.util.UUID
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.json.JsonArray
@@ -159,6 +161,10 @@ class FileRepository(
                 SortDirection.ASCENDING,
             )
         }
+    }
+
+    fun observeFolderDescriptors(): Flow<List<FolderDescriptor>> = folderDao.observeAll().map { folders ->
+        folders.map { FolderDescriptor(it.id, it.name, it.parentId) }
     }
 
     suspend fun getFileDetail(fileId: String): FileDetail = database.withTransaction {

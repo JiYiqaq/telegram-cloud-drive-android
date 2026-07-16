@@ -7,6 +7,7 @@ import androidx.lifecycle.viewModelScope
 import com.teledrive.lite.model.DirectorySnapshot
 import com.teledrive.lite.model.DirectoryEntry
 import com.teledrive.lite.model.EntryKind
+import com.teledrive.lite.model.MoveTarget
 import com.teledrive.lite.download.DownloadScheduler
 import com.teledrive.lite.deletion.DeletionScheduler
 import com.teledrive.lite.deletion.OrphanCleanupScheduler
@@ -15,6 +16,7 @@ import com.teledrive.lite.model.SortDirection
 import com.teledrive.lite.model.SortMode
 import com.teledrive.lite.repository.FileRepository
 import com.teledrive.lite.repository.FolderTreeValidator
+import com.teledrive.lite.repository.MoveTargetResolver
 import com.teledrive.lite.repository.TransferRepository
 import com.teledrive.lite.transfer.StreamingChunker
 import com.teledrive.lite.settings.AppPreferences
@@ -60,6 +62,11 @@ class HomeViewModel(
     val transfers = transferRepository.observeAll().stateIn(
         viewModelScope,
         SharingStarted.WhileSubscribed(5_000),
+        emptyList(),
+    )
+    private val folderDescriptors = fileRepository.observeFolderDescriptors().stateIn(
+        viewModelScope,
+        SharingStarted.Eagerly,
         emptyList(),
     )
     val isEnqueueing = MutableStateFlow(false)
@@ -167,14 +174,27 @@ class HomeViewModel(
     }
 
     fun deleteEntry(entry: DirectoryEntry) {
-        if (entry.kind == EntryKind.FILE) {
-            deleteFile(entry.id)
-        } else {
-            message.value = try {
-                folderDeletionScheduler.enqueue(entry.id)
-                "文件夹安全删除任务已开始"
-            } catch (_: Exception) {
-                "无法开始文件夹删除"
+        deleteEntries(listOf(entry))
+    }
+
+    fun deleteEntries(entries: List<DirectoryEntry>) {
+        val distinctEntries = entries.distinctBy(DirectoryEntry::id)
+        if (distinctEntries.isEmpty()) return
+        viewModelScope.launch {
+            var queued = 0
+            distinctEntries.forEach { entry ->
+                runCatching {
+                    if (entry.kind == EntryKind.FILE) {
+                        deletionScheduler.enqueue(entry.id)
+                    } else {
+                        folderDeletionScheduler.enqueue(entry.id)
+                    }
+                }.onSuccess { queued += 1 }
+            }
+            message.value = when {
+                queued == distinctEntries.size -> "已开始安全删除 $queued 项"
+                queued > 0 -> "已开始删除 $queued 项，${distinctEntries.size - queued} 项无法加入队列"
+                else -> "无法开始批量删除"
             }
         }
     }
@@ -226,12 +246,41 @@ class HomeViewModel(
         }
     }
 
-    fun moveEntryToRoot(entry: DirectoryEntry) = mutateAndPublish("已移动到根目录") {
-        if (entry.kind == EntryKind.FOLDER) {
-            fileRepository.moveFolder(entry.id, FolderTreeValidator.ROOT_ID)
-        } else {
-            val result = fileRepository.moveFiles(listOf(entry.id), FolderTreeValidator.ROOT_ID)
-            require(result.single().succeeded)
+    fun availableMoveTargets(entries: List<DirectoryEntry>): List<MoveTarget> =
+        MoveTargetResolver.resolve(
+            folderDescriptors.value,
+            entries.asSequence()
+                .filter { it.kind == EntryKind.FOLDER }
+                .map(DirectoryEntry::id)
+                .toSet(),
+        )
+
+    fun moveEntries(entries: List<DirectoryEntry>, targetFolderId: String) {
+        val distinctEntries = entries.distinctBy(DirectoryEntry::id)
+        if (distinctEntries.isEmpty()) return
+        viewModelScope.launch {
+            var succeeded = 0
+            distinctEntries.filter { it.kind == EntryKind.FOLDER }.forEach { folder ->
+                runCatching { fileRepository.moveFolder(folder.id, targetFolderId) }
+                    .onSuccess { succeeded += 1 }
+            }
+            val fileIds = distinctEntries.filter { it.kind == EntryKind.FILE }.map(DirectoryEntry::id)
+            if (fileIds.isNotEmpty()) {
+                succeeded += fileRepository.moveFiles(fileIds, targetFolderId).count { it.succeeded }
+            }
+            val failed = distinctEntries.size - succeeded
+            val indexPublished = if (succeeded > 0) {
+                runCatching { requireNotNull(indexUpdater()).resumeOrStart() }.isSuccess
+            } else {
+                true
+            }
+            message.value = when {
+                succeeded == 0 -> "没有项目被移动，请检查目标目录和名称冲突"
+                failed == 0 && indexPublished -> "已移动 $succeeded 项"
+                failed == 0 -> "已移动 $succeeded 项；云端索引将在稍后重试同步"
+                indexPublished -> "已移动 $succeeded 项，$failed 项失败"
+                else -> "已移动 $succeeded 项，$failed 项失败；云端索引待重试"
+            }
         }
     }
 

@@ -5,6 +5,17 @@ data class FolderNode(
     val parentId: String?,
 )
 
+data class FolderDescriptor(
+    val id: String,
+    val name: String,
+    val parentId: String?,
+)
+
+data class MoveTarget(
+    val id: String,
+    val path: String,
+)
+
 data class DirectoryEntry(
     val id: String,
     val name: String,

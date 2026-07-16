@@ -14,7 +14,7 @@ All notable changes follow semantic versioning. This project is pre-release soft
 - Reliable encrypted upload and verified download workers
 - Encrypted pinned-index atomic update and cross-device recovery
 - Safe deletion, partial failure recovery and orphan cleanup
-- Chinese setup/tutorial/settings/file-management UI and theme controls
+- Chinese setup/tutorial/settings/file-management UI, arbitrary-target batch move/delete, and theme controls
 - Unit, MockWebServer and Android Room/migration tests
 - GitHub Actions and open-source project documentation
 
