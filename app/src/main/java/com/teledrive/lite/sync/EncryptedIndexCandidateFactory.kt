@@ -8,6 +8,8 @@ import com.teledrive.lite.index.CloudIndexPayloadMapper
 import com.teledrive.lite.index.CloudIndexPointer
 import com.teledrive.lite.index.EncryptedIndexCodec
 import com.teledrive.lite.model.PendingOperationType
+import com.teledrive.lite.model.ChunkUploadStatus
+import com.teledrive.lite.model.FileStatus
 import com.teledrive.lite.repository.CloudCacheSnapshot
 import com.teledrive.lite.settings.SetupCryptoContext
 import com.teledrive.lite.util.SecureErase
@@ -17,6 +19,8 @@ import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
+import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.jsonArray
 
 interface IndexSnapshotSource {
     suspend fun read(includedOperationIds: Set<String>): CloudCacheSnapshot
@@ -32,7 +36,7 @@ class RoomIndexSnapshotSource(
             if (operations.map { it.id }.toSet() != includedOperationIds) {
                 fail(IndexCandidateFailure.SNAPSHOT_CHANGED)
             }
-            CloudCacheSnapshot(
+            CompletedDeletionIndexProjection.project(CloudCacheSnapshot(
                 folders = database.folderDao().getAll(),
                 files = database.fileDao().getAll(),
                 chunks = database.chunkDao().getAll(),
@@ -40,10 +44,44 @@ class RoomIndexSnapshotSource(
                     database.indexStateDao().get(com.teledrive.lite.database.IndexStateEntity.SINGLETON_ID),
                 ),
                 pendingOperations = operations,
-            )
+            ))
         }
 
     private fun fail(failure: IndexCandidateFailure): Nothing = throw IndexCandidateException(failure)
+}
+
+object CompletedDeletionIndexProjection {
+    fun project(snapshot: CloudCacheSnapshot): CloudCacheSnapshot {
+        val chunksByFile = snapshot.chunks.groupBy { it.fileId }
+        val filesById = snapshot.files.associateBy { it.id }
+        val completedFileIds = snapshot.pendingOperations.asSequence()
+            .filter { operation ->
+                operation.type == PendingOperationType.DELETE &&
+                    operation.remainingMessageIdsJson.hasNoMessageIds()
+            }
+            .map { it.targetId }
+            .filter { fileId ->
+                val file = filesById[fileId] ?: return@filter false
+                val chunks = chunksByFile[fileId].orEmpty()
+                file.status == FileStatus.DELETING &&
+                    chunks.size == file.chunkCount &&
+                    chunks.all { it.uploadStatus == ChunkUploadStatus.DELETED }
+            }
+            .toSet()
+        if (completedFileIds.isEmpty()) return snapshot
+        return snapshot.copy(
+            files = snapshot.files.filterNot { it.id in completedFileIds },
+            chunks = snapshot.chunks.filterNot { it.fileId in completedFileIds },
+            pendingOperations = snapshot.pendingOperations.filterNot { operation ->
+                operation.type == PendingOperationType.DELETE &&
+                    operation.targetId in completedFileIds
+            },
+        )
+    }
+
+    private fun String?.hasNoMessageIds(): Boolean = runCatching {
+        this != null && Json.parseToJsonElement(this).jsonArray.isEmpty()
+    }.getOrDefault(false)
 }
 
 interface IndexCandidateArtifactStore {
@@ -300,7 +338,7 @@ class EncryptedIndexCandidateFactory(
             state.revision != revision - 1 ||
             state.currentIndexMessageId != previousMessageId ||
             state.currentIndexFileId != previousFileId ||
-            snapshot.pendingOperations.map { it.id }.toSet() != includedOperationIds
+            !includedOperationIds.containsAll(snapshot.pendingOperations.map { it.id })
         ) {
             fail(IndexCandidateFailure.SNAPSHOT_CHANGED)
         }
@@ -315,7 +353,7 @@ class EncryptedIndexCandidateFactory(
             payload.currentIndexMessageId != PREPARED_MESSAGE_ID ||
             payload.previousIndexMessageId != request.previousIndexMessageId ||
             payload.previous?.fileId != request.previousIndexFileId ||
-            payload.pendingOperations.map { it.id }.toSet() != request.includedOperationIds
+            !request.includedOperationIds.containsAll(payload.pendingOperations.map { it.id })
         ) {
             fail(IndexCandidateFailure.ARTIFACT_MISMATCH)
         }
@@ -327,7 +365,7 @@ class EncryptedIndexCandidateFactory(
             payload.currentIndexMessageId != request.messageId ||
             payload.previousIndexMessageId != request.previousIndexMessageId ||
             payload.previous?.fileId != request.previousIndexFileId ||
-            payload.pendingOperations.map { it.id }.toSet() != request.includedOperationIds
+            !request.includedOperationIds.containsAll(payload.pendingOperations.map { it.id })
         ) {
             fail(IndexCandidateFailure.ARTIFACT_MISMATCH)
         }

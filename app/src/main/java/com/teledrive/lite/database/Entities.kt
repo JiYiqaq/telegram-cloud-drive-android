@@ -153,6 +153,8 @@ data class TransferTaskEntity(
     @ColumnInfo(name = "created_at") val createdAtEpochMillis: Long,
     @ColumnInfo(name = "updated_at") val updatedAtEpochMillis: Long,
     @ColumnInfo(name = "source_uri") val sourceUri: String? = null,
+    @ColumnInfo(name = "destination_uri") val destinationUri: String? = null,
+    @ColumnInfo(name = "previous_file_status") val previousFileStatus: FileStatus? = null,
 ) {
     init {
         require(completedBytes >= 0 && totalBytes >= 0 && completedBytes <= totalBytes)

@@ -7,6 +7,7 @@ import android.text.format.Formatter
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -16,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.Card
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
@@ -30,7 +32,9 @@ import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -42,7 +46,9 @@ import com.teledrive.lite.R
 import com.teledrive.lite.database.TransferTaskEntity
 import com.teledrive.lite.model.DirectoryEntry
 import com.teledrive.lite.model.EntryKind
+import com.teledrive.lite.model.FileStatus
 import com.teledrive.lite.model.TransferType
+import com.teledrive.lite.download.DownloadRetryPolicy
 import com.teledrive.lite.upload.UploadRetryPolicy
 import kotlin.math.roundToInt
 
@@ -57,6 +63,15 @@ fun HomeRoute(
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
+    var pendingDownload by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var pendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
+    val downloadDestination = rememberLauncherForActivityResult(
+        ActivityResultContracts.CreateDocument("*/*"),
+    ) { uri ->
+        val entry = pendingDownload
+        pendingDownload = null
+        if (uri != null && entry != null) viewModel.enqueueDownload(entry.id, uri)
+    }
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenMultipleDocuments()) { uris ->
         viewModel.enqueueUploads(uris)
     }
@@ -70,6 +85,26 @@ fun HomeRoute(
             snackbarHostState.showSnackbar(it)
             viewModel.consumeMessage()
         }
+    }
+    pendingDeletion?.let { entry ->
+        AlertDialog(
+            onDismissRequest = { pendingDeletion = null },
+            title = { Text(stringResource(R.string.confirm_delete_title)) },
+            text = { Text(stringResource(R.string.confirm_delete_message, entry.name)) },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        pendingDeletion = null
+                        viewModel.deleteFile(entry.id)
+                    },
+                ) { Text(stringResource(R.string.delete)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDeletion = null }) {
+                    Text(stringResource(R.string.cancel))
+                }
+            },
+        )
     }
     HomeScreen(
         entries = directory?.entries.orEmpty(),
@@ -91,6 +126,14 @@ fun HomeRoute(
         },
         onCancelUpload = viewModel::cancelUpload,
         onRetryUpload = viewModel::retryUpload,
+        onCleanupUpload = viewModel::cleanupUpload,
+        onDownload = { entry ->
+            pendingDownload = entry
+            downloadDestination.launch(entry.name)
+        },
+        onCancelDownload = viewModel::cancelDownload,
+        onRetryDownload = viewModel::retryDownload,
+        onDelete = { pendingDeletion = it },
         snackbarHostState = snackbarHostState,
         modifier = modifier,
     )
@@ -106,6 +149,11 @@ fun HomeScreen(
     onAddFile: () -> Unit,
     onCancelUpload: (String) -> Unit,
     onRetryUpload: (String) -> Unit,
+    onCleanupUpload: (String) -> Unit,
+    onDownload: (DirectoryEntry) -> Unit,
+    onCancelDownload: (String) -> Unit,
+    onRetryDownload: (String) -> Unit,
+    onDelete: (DirectoryEntry) -> Unit,
     snackbarHostState: SnackbarHostState,
     modifier: Modifier = Modifier,
 ) {
@@ -143,6 +191,9 @@ fun HomeScreen(
                             task = transfer,
                             onCancelUpload = onCancelUpload,
                             onRetryUpload = onRetryUpload,
+                            onCleanupUpload = onCleanupUpload,
+                            onCancelDownload = onCancelDownload,
+                            onRetryDownload = onRetryDownload,
                         )
                     }
                 }
@@ -161,7 +212,7 @@ fun HomeScreen(
                     }
                 } else {
                     items(entries, key = { "entry:${it.id}" }) { entry ->
-                        EntryCard(entry)
+                        EntryCard(entry, onDownload, onDelete)
                     }
                 }
                 if (isEnqueueing) {
@@ -178,8 +229,24 @@ fun HomeScreen(
 }
 
 @Composable
-private fun EntryCard(entry: DirectoryEntry) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+private fun EntryCard(
+    entry: DirectoryEntry,
+    onDownload: (DirectoryEntry) -> Unit,
+    onDelete: (DirectoryEntry) -> Unit,
+) {
+    val downloadable = entry.kind == EntryKind.FILE &&
+        entry.fileStatus in setOf(FileStatus.AVAILABLE, FileStatus.CORRUPTED)
+    val deletable = entry.kind == EntryKind.FILE && entry.fileStatus in setOf(
+        FileStatus.AVAILABLE,
+        FileStatus.CORRUPTED,
+        FileStatus.FAILED,
+        FileStatus.PARTIALLY_DELETED,
+    )
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(enabled = downloadable) { onDownload(entry) },
+    ) {
         Column(Modifier.padding(16.dp)) {
             Text(entry.name, style = MaterialTheme.typography.titleSmall)
             Text(
@@ -190,6 +257,27 @@ private fun EntryCard(entry: DirectoryEntry) {
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (downloadable) {
+                Text(
+                    stringResource(R.string.tap_to_download),
+                    color = MaterialTheme.colorScheme.primary,
+                )
+            }
+            if (deletable) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onDelete(entry) }) {
+                        Text(
+                            stringResource(
+                                if (entry.fileStatus == FileStatus.PARTIALLY_DELETED) {
+                                    R.string.retry_safe_delete
+                                } else {
+                                    R.string.delete
+                                },
+                            ),
+                        )
+                    }
+                }
+            }
         }
     }
 }
@@ -199,6 +287,9 @@ private fun TransferCard(
     task: TransferTaskEntity,
     onCancelUpload: (String) -> Unit,
     onRetryUpload: (String) -> Unit,
+    onCleanupUpload: (String) -> Unit,
+    onCancelDownload: (String) -> Unit,
+    onRetryDownload: (String) -> Unit,
 ) {
     val context = LocalContext.current
     val progress = if (task.totalBytes == 0L) {
@@ -260,6 +351,31 @@ private fun TransferCard(
                     }
                     if (UploadRetryPolicy.canRetry(task)) {
                         TextButton(onClick = { onRetryUpload(task.id) }) {
+                            Text(stringResource(R.string.retry))
+                        }
+                    }
+                    if (task.status in setOf(
+                            com.teledrive.lite.model.TransferStatus.CANCELED,
+                            com.teledrive.lite.model.TransferStatus.FAILED,
+                        )
+                    ) {
+                        TextButton(onClick = { onCleanupUpload(task.id) }) {
+                            Text(stringResource(R.string.cleanup_remote_chunks))
+                        }
+                    }
+                }
+            } else if (task.type == TransferType.DOWNLOAD) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (DownloadRetryPolicy.canCancel(task)) {
+                        TextButton(onClick = { onCancelDownload(task.id) }) {
+                            Text(stringResource(R.string.cancel))
+                        }
+                    }
+                    if (DownloadRetryPolicy.canRetry(task)) {
+                        TextButton(onClick = { onRetryDownload(task.id) }) {
                             Text(stringResource(R.string.retry))
                         }
                     }

@@ -69,6 +69,9 @@ fun TeleDriveNavHost(
                     fileRepository = container.fileRepository,
                     transferRepository = container.transferRepository,
                     uploadScheduler = container.uploadScheduler,
+                    downloadScheduler = container.downloadScheduler,
+                    deletionScheduler = container.deletionScheduler,
+                    orphanCleanupScheduler = container.orphanCleanupScheduler,
                 ),
             )
             HomeRoute(viewModel = homeViewModel)

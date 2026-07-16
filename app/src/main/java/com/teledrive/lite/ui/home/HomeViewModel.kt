@@ -5,6 +5,9 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.teledrive.lite.model.DirectorySnapshot
+import com.teledrive.lite.download.DownloadScheduler
+import com.teledrive.lite.deletion.DeletionScheduler
+import com.teledrive.lite.deletion.OrphanCleanupScheduler
 import com.teledrive.lite.model.SortDirection
 import com.teledrive.lite.model.SortMode
 import com.teledrive.lite.repository.FileRepository
@@ -24,6 +27,9 @@ class HomeViewModel(
     private val fileRepository: FileRepository,
     transferRepository: TransferRepository,
     private val uploadScheduler: UploadScheduler,
+    private val downloadScheduler: DownloadScheduler,
+    private val deletionScheduler: DeletionScheduler,
+    private val orphanCleanupScheduler: OrphanCleanupScheduler,
 ) : ViewModel() {
     val directory = rootDirectoryFlow().stateIn(
         viewModelScope,
@@ -87,8 +93,62 @@ class HomeViewModel(
         }
     }
 
+    fun enqueueDownload(fileId: String, destinationUri: Uri) {
+        viewModelScope.launch {
+            message.value = try {
+                downloadScheduler.enqueue(fileId, destinationUri)
+                "文件已加入下载队列"
+            } catch (_: Exception) {
+                "无法开始下载，请检查文件状态和保存位置"
+            }
+        }
+    }
+
+    fun cancelDownload(taskId: String) {
+        viewModelScope.launch {
+            message.value = try {
+                downloadScheduler.cancel(taskId)
+                "下载已取消，未完成的输出已清空"
+            } catch (_: Exception) {
+                "无法取消此下载任务"
+            }
+        }
+    }
+
+    fun retryDownload(taskId: String) {
+        viewModelScope.launch {
+            message.value = try {
+                downloadScheduler.retry(taskId)
+                "下载已从头重新加入队列"
+            } catch (_: Exception) {
+                "此任务无法重试，请重新选择文件"
+            }
+        }
+    }
+
+    fun deleteFile(fileId: String) {
+        viewModelScope.launch {
+            message.value = try {
+                deletionScheduler.enqueue(fileId)
+                "安全删除任务已开始"
+            } catch (_: Exception) {
+                "无法开始删除；若为部分删除文件，请稍后重试"
+            }
+        }
+    }
+
+    fun cleanupUpload(taskId: String) {
+        message.value = try {
+            orphanCleanupScheduler.enqueue(taskId)
+            "孤立分块清理已加入队列"
+        } catch (_: Exception) {
+            "无法清理此上传的远端分块"
+        }
+    }
+
     private fun rootDirectoryFlow(): Flow<DirectorySnapshot> = flow {
         uploadScheduler.refreshNetworkState()
+        downloadScheduler.refreshNetworkState()
         fileRepository.initializeRoot()
         emitAll(
             fileRepository.observeDirectory(
@@ -104,10 +164,20 @@ class HomeViewModelFactory(
     private val fileRepository: FileRepository,
     private val transferRepository: TransferRepository,
     private val uploadScheduler: UploadScheduler,
+    private val downloadScheduler: DownloadScheduler,
+    private val deletionScheduler: DeletionScheduler,
+    private val orphanCleanupScheduler: OrphanCleanupScheduler,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
         require(modelClass.isAssignableFrom(HomeViewModel::class.java))
-        return HomeViewModel(fileRepository, transferRepository, uploadScheduler) as T
+        return HomeViewModel(
+            fileRepository,
+            transferRepository,
+            uploadScheduler,
+            downloadScheduler,
+            deletionScheduler,
+            orphanCleanupScheduler,
+        ) as T
     }
 }

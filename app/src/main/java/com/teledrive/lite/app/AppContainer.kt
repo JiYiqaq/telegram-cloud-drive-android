@@ -7,6 +7,22 @@ import com.teledrive.lite.crypto.CryptoEngine
 import com.teledrive.lite.crypto.KeyWrapping
 import com.teledrive.lite.database.TeleDriveDatabase
 import com.teledrive.lite.index.EncryptedIndexCodec
+import com.teledrive.lite.deletion.DeletionScheduler
+import com.teledrive.lite.deletion.DeletionServices
+import com.teledrive.lite.deletion.RepositoryDeletionStore
+import com.teledrive.lite.deletion.SafeDeletionCoordinator
+import com.teledrive.lite.deletion.TelegramDeletionRemote
+import com.teledrive.lite.deletion.VerifiedDeletionIndexPublisher
+import com.teledrive.lite.deletion.LocalOrphanCleanupPublisher
+import com.teledrive.lite.deletion.OrphanCleanupScheduler
+import com.teledrive.lite.deletion.RoomOrphanCleanupStore
+import com.teledrive.lite.download.ContentResolverDownloadDestination
+import com.teledrive.lite.download.DownloadCoordinator
+import com.teledrive.lite.download.DownloadQueueRepository
+import com.teledrive.lite.download.DownloadScheduler
+import com.teledrive.lite.download.DownloadServices
+import com.teledrive.lite.download.RoomDownloadStore
+import com.teledrive.lite.download.TelegramDownloadRemote
 import com.teledrive.lite.repository.ConnectionRepository
 import com.teledrive.lite.repository.FileRepository
 import com.teledrive.lite.repository.SetupConnectionService
@@ -28,6 +44,9 @@ import com.teledrive.lite.sync.IndexRecoveryService
 import com.teledrive.lite.sync.RoomIndexLocalStore
 import com.teledrive.lite.sync.RoomIndexSnapshotSource
 import com.teledrive.lite.sync.TelegramIndexRemote
+import com.teledrive.lite.sync.PinnedIndexSnapshotReader
+import com.teledrive.lite.telegram.TelegramApiException
+import com.teledrive.lite.telegram.TelegramFailure
 import java.io.File
 import java.util.UUID
 import com.teledrive.lite.upload.RoomUploadStore
@@ -56,6 +75,15 @@ class AppContainer(context: Context) {
         queueRepository = uploadQueueRepository,
         uploadStore = uploadStore,
     )
+    val downloadQueueRepository = DownloadQueueRepository(database)
+    val downloadStore = RoomDownloadStore(database)
+    val downloadScheduler = DownloadScheduler(
+        context = applicationContext,
+        queueRepository = downloadQueueRepository,
+        downloadStore = downloadStore,
+    )
+    val deletionScheduler = DeletionScheduler(applicationContext, fileRepository)
+    val orphanCleanupScheduler = OrphanCleanupScheduler(applicationContext)
 
     private val secureValues = SharedPreferencesStringValueStore(
         applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
@@ -148,6 +176,79 @@ class AppContainer(context: Context) {
                 cryptoEngine = cryptoEngine,
                 keyWrapping = KeyWrapping(cryptoEngine),
                 cryptoContextProvider = setupStateStore::loadCryptoContext,
+            ),
+        )
+    }
+
+    fun createDownloadServices(): DownloadServices? {
+        val config = secureConfigStore.load() ?: return null
+        setupStateStore.loadCryptoContext()?.close() ?: return null
+        val cryptoEngine = CryptoEngine()
+        return DownloadServices(
+            store = downloadStore,
+            coordinator = DownloadCoordinator(
+                store = downloadStore,
+                remote = TelegramDownloadRemote(TelegramBotApiClient(config.botToken)),
+                destination = ContentResolverDownloadDestination(applicationContext.contentResolver),
+                cryptoEngine = cryptoEngine,
+                keyWrapping = KeyWrapping(cryptoEngine),
+                cryptoContextProvider = setupStateStore::loadCryptoContext,
+            ),
+        )
+    }
+
+    fun createDeletionServices(): DeletionServices? {
+        val config = secureConfigStore.load() ?: return null
+        setupStateStore.loadCryptoContext()?.close() ?: return null
+        val cloudIndex = createCloudIndexServices() ?: return null
+        val gateway = TelegramBotApiClient(config.botToken)
+        val indexRemote = TelegramIndexRemote(gateway, config.channelId)
+        val encryptedCodec = EncryptedIndexCodec(CloudIndexEnvelopeCryptor(CryptoEngine()))
+        return DeletionServices(
+            coordinator = SafeDeletionCoordinator(
+                store = RepositoryDeletionStore(fileRepository),
+                remote = TelegramDeletionRemote(gateway, config.channelId),
+                indexPublisher = VerifiedDeletionIndexPublisher(
+                    updater = cloudIndex.updater,
+                    snapshotReader = PinnedIndexSnapshotReader(
+                        remote = indexRemote,
+                        encryptedIndexCodec = encryptedCodec,
+                        cryptoContextProvider = setupStateStore::loadCryptoContext,
+                    ),
+                    repository = fileRepository,
+                    maximumAttempts = MAX_INDEX_PUBLICATION_ATTEMPTS,
+                ),
+                errorCode = { error ->
+                    when (error) {
+                        is TelegramApiException -> when (val failure = error.failure) {
+                            is TelegramFailure.Api -> "DELETE_API_${failure.errorCode ?: failure.httpStatusCode}"
+                            is TelegramFailure.Http -> "DELETE_HTTP_${failure.statusCode}"
+                            is TelegramFailure.Network -> "DELETE_RESULT_UNKNOWN"
+                            TelegramFailure.InvalidResponse -> "DELETE_INVALID_RESPONSE"
+                        }
+                        else -> "REMOTE_DELETE_FAILED"
+                    }
+                },
+            ),
+        )
+    }
+
+    fun createOrphanCleanupServices(): DeletionServices? {
+        val config = secureConfigStore.load() ?: return null
+        val gateway = TelegramBotApiClient(config.botToken)
+        val store = RoomOrphanCleanupStore(database)
+        return DeletionServices(
+            coordinator = SafeDeletionCoordinator(
+                store = store,
+                remote = TelegramDeletionRemote(gateway, config.channelId),
+                indexPublisher = LocalOrphanCleanupPublisher(store),
+                errorCode = { error ->
+                    if (error is TelegramApiException && error.failure is TelegramFailure.Network) {
+                        "ORPHAN_DELETE_RESULT_UNKNOWN"
+                    } else {
+                        "ORPHAN_DELETE_FAILED"
+                    }
+                },
             ),
         )
     }

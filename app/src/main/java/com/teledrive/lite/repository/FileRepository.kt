@@ -7,6 +7,7 @@ import com.teledrive.lite.database.FolderEntity
 import com.teledrive.lite.database.IndexStateEntity
 import com.teledrive.lite.database.PendingOperationEntity
 import com.teledrive.lite.database.TeleDriveDatabase
+import com.teledrive.lite.deletion.PendingChunkDeletion
 import com.teledrive.lite.model.ChunkUploadStatus
 import com.teledrive.lite.model.DirectoryEntry
 import com.teledrive.lite.model.DirectorySnapshot
@@ -524,6 +525,35 @@ class FileRepository(
             indexStateDao.upsert(indexState.copy(syncStatus = IndexSyncStatus.DIRTY))
         }
     }
+
+    suspend fun pendingChunkDeletions(fileId: String): List<PendingChunkDeletion> =
+        mutationMutex.withLock {
+            database.withTransaction {
+                val file = fileDao.getById(fileId)
+                    ?: fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+                if (file.status !in FINAL_DELETION_STATES) {
+                    fail(DriveRepositoryFailure.INVALID_FILE_STATE)
+                }
+                val operation = pendingOperationDao.getById(deletionOperationId(fileId))
+                    ?: fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
+                if (
+                    operation.type != PendingOperationType.DELETE ||
+                    operation.targetId != fileId
+                ) {
+                    fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
+                }
+                val remainingIds = parseRemainingMessageIds(operation.remainingMessageIdsJson)
+                val pending = chunkDao.getForFile(fileId)
+                    .filter { it.messageId in remainingIds }
+                    .map { chunk ->
+                        PendingChunkDeletion(chunk.id, requireNotNull(chunk.messageId))
+                    }
+                if (pending.map { it.messageId }.toSet() != remainingIds) {
+                    fail(DriveRepositoryFailure.REMOTE_DELETE_INCOMPLETE)
+                }
+                pending
+            }
+        }
 
     suspend fun finalizeFileDeletion(
         fileId: String,

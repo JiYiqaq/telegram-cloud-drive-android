@@ -260,6 +260,24 @@ interface TransferTaskDao {
     suspend fun markQueuedUploadsWaitingForNetwork(updatedAt: Long): Int
 
     @Query(
+        "UPDATE transfer_tasks SET status = 'QUEUED', completed_bytes = 0, current_chunk = 0, " +
+            "attempt = attempt + 1, work_request_id = :workRequestId, next_retry_at = NULL, " +
+            "error_code = NULL, speed_bytes_per_second = 0, updated_at = :updatedAt WHERE id = :id",
+    )
+    suspend fun restartWithWorkRequest(
+        id: String,
+        workRequestId: String,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        "UPDATE transfer_tasks SET status = 'WAITING_FOR_NETWORK', error_code = NULL, " +
+            "speed_bytes_per_second = 0, updated_at = :updatedAt " +
+            "WHERE type = 'DOWNLOAD' AND status = 'QUEUED'",
+    )
+    suspend fun markQueuedDownloadsWaitingForNetwork(updatedAt: Long): Int
+
+    @Query(
         "UPDATE transfer_tasks SET status = 'CANCELED', error_code = :reason, " +
             "next_retry_at = NULL, speed_bytes_per_second = 0, updated_at = :updatedAt " +
             "WHERE file_id = :fileId AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELED')",

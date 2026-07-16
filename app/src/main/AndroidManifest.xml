@@ -38,6 +38,9 @@
         <receiver
             android:name=".upload.UploadCancelReceiver"
             android:exported="false" />
+        <receiver
+            android:name=".download.DownloadCancelReceiver"
+            android:exported="false" />
     </application>
 
 </manifest>
