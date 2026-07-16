@@ -2,6 +2,8 @@ package com.teledrive.lite.sync
 
 import com.teledrive.lite.crypto.UnsupportedCloudIndexEnvelopeVersionException
 import com.teledrive.lite.crypto.UnsupportedCloudIndexKdfException
+import com.teledrive.lite.crypto.KeyDerivation
+import com.teledrive.lite.crypto.KeyDerivationParameters
 import com.teledrive.lite.index.CloudIndexPayloadMapper
 import com.teledrive.lite.index.EncryptedIndexCodec
 import com.teledrive.lite.index.IndexFormatException
@@ -12,6 +14,10 @@ import com.teledrive.lite.util.SecureErase
 
 interface IndexCacheReplacer {
     suspend fun replace(snapshot: CloudCacheSnapshot)
+}
+
+fun interface RecoveryContextCommitter {
+    fun commit(parameters: KeyDerivationParameters, masterKey: ByteArray)
 }
 
 class FileRepositoryIndexCacheReplacer(
@@ -39,6 +45,7 @@ enum class IndexRecoveryFailure {
     PAYLOAD_POINTER_MISMATCH,
     PIN_CHANGED_DURING_RECOVERY,
     LOCAL_CACHE_REJECTED,
+    CONTEXT_COMMIT_FAILED,
 }
 
 class IndexRecoveryException(
@@ -50,6 +57,7 @@ class IndexRecoveryService(
     private val remote: IndexRecoveryRemote,
     private val encryptedIndexCodec: EncryptedIndexCodec,
     private val cacheReplacer: IndexCacheReplacer,
+    private val contextCommitter: RecoveryContextCommitter? = null,
     private val clock: () -> Long = System::currentTimeMillis,
 ) {
     suspend fun recover(password: CharArray): IndexRecoveryOutcome {
@@ -96,6 +104,29 @@ class IndexRecoveryService(
 
             if (remote.getPinned() != pinned) {
                 fail(IndexRecoveryFailure.PIN_CHANGED_DURING_RECOVERY)
+            }
+            contextCommitter?.let { committer ->
+                val salt = payload.keyDerivation.salt.toByteArray()
+                var masterKey: ByteArray? = null
+                try {
+                    val parameters = KeyDerivationParameters.pbkdf2(
+                        salt = salt,
+                        iterations = payload.keyDerivation.iterations,
+                        keyLengthBytes = payload.keyDerivation.keyLengthBytes,
+                    )
+                    if (payload.keyDerivation.algorithm != parameters.algorithm) {
+                        fail(IndexRecoveryFailure.UNSUPPORTED_INDEX)
+                    }
+                    masterKey = KeyDerivation.derive(passwordCopy, parameters)
+                    committer.commit(parameters, masterKey)
+                } catch (error: IndexRecoveryException) {
+                    throw error
+                } catch (error: Exception) {
+                    throw IndexRecoveryException(IndexRecoveryFailure.CONTEXT_COMMIT_FAILED, error)
+                } finally {
+                    SecureErase.wipe(salt)
+                    masterKey?.let(SecureErase::wipe)
+                }
             }
             try {
                 cacheReplacer.replace(snapshot)

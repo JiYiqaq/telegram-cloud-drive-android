@@ -42,9 +42,10 @@ private val DarkColorScheme = darkColorScheme(
 
 @Composable
 fun TeleDriveTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkThemeOverride: Boolean? = null,
     content: @Composable () -> Unit,
 ) {
+    val darkTheme = darkThemeOverride ?: isSystemInDarkTheme()
     MaterialTheme(
         colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme,
         typography = TeleDriveTypography,

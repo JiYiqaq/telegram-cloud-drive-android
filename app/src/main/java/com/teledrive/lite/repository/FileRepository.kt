@@ -84,6 +84,12 @@ data class FileDeletionStart(
     val canceledWorkRequestIds: List<String>,
 )
 
+data class FileDetail(
+    val file: FileEntity,
+    val chunks: List<ChunkEntity>,
+    val parentFolderName: String,
+)
+
 class FileRepository(
     private val database: TeleDriveDatabase,
     private val idGenerator: () -> String = { UUID.randomUUID().toString() },
@@ -153,6 +159,13 @@ class FileRepository(
                 SortDirection.ASCENDING,
             )
         }
+    }
+
+    suspend fun getFileDetail(fileId: String): FileDetail = database.withTransaction {
+        val file = fileDao.getById(fileId) ?: fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+        val parent = folderDao.getById(file.parentFolderId)
+            ?: fail(DriveRepositoryFailure.PARENT_NOT_FOUND)
+        FileDetail(file, chunkDao.getForFile(fileId), parent.name)
     }
 
     suspend fun createFolder(parentId: String, name: String): FolderEntity = mutationMutex.withLock {

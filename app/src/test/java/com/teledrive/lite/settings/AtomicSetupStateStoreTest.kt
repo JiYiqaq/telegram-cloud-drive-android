@@ -70,6 +70,26 @@ class AtomicSetupStateStoreTest {
         assertEquals(SecureStorageFailure.CORRUPTED, failure.failure)
     }
 
+    @Test
+    fun clearRemovesWholeGenerationAndBothKeystoreKeys() {
+        val values = CountingValues()
+        val configCipher = CopyCipher()
+        val sessionCipher = CopyCipher()
+        val store = AtomicSetupStateStore(values, configCipher, sessionCipher)
+        store.commit(
+            ValidatedConnectionConfig("token", -1001234567890),
+            ByteArray(32),
+            KeyDerivationParameters.pbkdf2(ByteArray(16), 600_000),
+        )
+
+        store.clear()
+
+        assertTrue(values.data.isEmpty())
+        assertTrue(configCipher.deleted)
+        assertTrue(sessionCipher.deleted)
+        assertTrue(!store.isComplete())
+    }
+
     private class CountingValues(
         val data: MutableMap<String, String> = mutableMapOf(),
     ) : StringValueStore {
@@ -90,11 +110,14 @@ class AtomicSetupStateStoreTest {
     }
 
     private open class CopyCipher : SecretCipher {
+        var deleted = false
         override fun encrypt(plaintext: ByteArray, associatedData: ByteArray): ByteArray = plaintext.copyOf()
 
         override fun decrypt(ciphertext: ByteArray, associatedData: ByteArray): ByteArray = ciphertext.copyOf()
 
-        override fun deleteKey() = Unit
+        override fun deleteKey() {
+            deleted = true
+        }
     }
 
     private class FailingCipher(

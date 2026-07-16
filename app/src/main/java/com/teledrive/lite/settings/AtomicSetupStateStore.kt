@@ -112,6 +112,14 @@ class AtomicSetupStateStore(
         }
     }
 
+    @Synchronized
+    fun clear() {
+        var failed = !values.remove(REQUIRED_KEYS)
+        runCatching { configCipher.deleteKey() }.onFailure { failed = true }
+        runCatching { sessionCipher.deleteKey() }.onFailure { failed = true }
+        if (failed) throw SecureStorageException(SecureStorageFailure.WRITE_FAILED)
+    }
+
     private fun createBinding(
         masterKey: ByteArray,
         parameters: KeyDerivationParameters,

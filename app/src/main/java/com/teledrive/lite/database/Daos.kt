@@ -165,6 +165,9 @@ interface ChunkDao {
 @Dao
 interface TransferTaskDao {
     @Query("SELECT * FROM transfer_tasks ORDER BY updated_at DESC")
+    suspend fun getAll(): List<TransferTaskEntity>
+
+    @Query("SELECT * FROM transfer_tasks ORDER BY updated_at DESC")
     fun observeAll(): Flow<List<TransferTaskEntity>>
 
     @Query(

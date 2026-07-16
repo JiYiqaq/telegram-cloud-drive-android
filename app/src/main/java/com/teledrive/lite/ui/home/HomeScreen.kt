@@ -23,6 +23,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
@@ -48,23 +49,36 @@ import com.teledrive.lite.model.DirectoryEntry
 import com.teledrive.lite.model.EntryKind
 import com.teledrive.lite.model.FileStatus
 import com.teledrive.lite.model.TransferType
+import com.teledrive.lite.model.SortMode
+import com.teledrive.lite.model.SortDirection
 import com.teledrive.lite.download.DownloadRetryPolicy
 import com.teledrive.lite.upload.UploadRetryPolicy
 import kotlin.math.roundToInt
+import java.text.DateFormat
+import java.util.Date
 
 @Composable
 fun HomeRoute(
     viewModel: HomeViewModel,
+    onOpenSettings: () -> Unit,
+    onOpenFileDetail: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val directory by viewModel.directory.collectAsStateWithLifecycle()
     val transfers by viewModel.transfers.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val sortMode by viewModel.sortMode.collectAsStateWithLifecycle()
+    val sortDirection by viewModel.sortDirection.collectAsStateWithLifecycle()
     val isEnqueueing by viewModel.isEnqueueing.collectAsStateWithLifecycle()
     val message by viewModel.message.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     val context = LocalContext.current
     var pendingDownload by remember { mutableStateOf<DirectoryEntry?>(null) }
     var pendingDeletion by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var pendingRename by remember { mutableStateOf<DirectoryEntry?>(null) }
+    var creatingFolder by remember { mutableStateOf(false) }
+    var nameInput by remember { mutableStateOf("") }
     val downloadDestination = rememberLauncherForActivityResult(
         ActivityResultContracts.CreateDocument("*/*"),
     ) { uri ->
@@ -95,7 +109,7 @@ fun HomeRoute(
                 TextButton(
                     onClick = {
                         pendingDeletion = null
-                        viewModel.deleteFile(entry.id)
+                        viewModel.deleteEntry(entry)
                     },
                 ) { Text(stringResource(R.string.delete)) }
             },
@@ -106,8 +120,50 @@ fun HomeRoute(
             },
         )
     }
+    if (creatingFolder || pendingRename != null) {
+        val renameEntry = pendingRename
+        AlertDialog(
+            onDismissRequest = {
+                creatingFolder = false
+                pendingRename = null
+                nameInput = ""
+            },
+            title = { Text(if (renameEntry == null) "新建文件夹" else "重命名") },
+            text = {
+                OutlinedTextField(
+                    value = nameInput,
+                    onValueChange = { nameInput = it },
+                    label = { Text("名称") },
+                    singleLine = true,
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        if (renameEntry == null) viewModel.createFolder(nameInput)
+                        else viewModel.renameEntry(renameEntry, nameInput)
+                        creatingFolder = false
+                        pendingRename = null
+                        nameInput = ""
+                    },
+                    enabled = nameInput.isNotBlank(),
+                ) { Text("保存") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    creatingFolder = false
+                    pendingRename = null
+                    nameInput = ""
+                }) { Text("取消") }
+            },
+        )
+    }
     HomeScreen(
-        entries = directory?.entries.orEmpty(),
+        entries = if (searchQuery.isBlank()) directory?.entries.orEmpty() else searchResults,
+        breadcrumbs = directory?.breadcrumbs.orEmpty(),
+        searchQuery = searchQuery,
+        sortMode = sortMode,
+        sortDirection = sortDirection,
         transfers = transfers,
         loading = directory == null,
         isEnqueueing = isEnqueueing,
@@ -134,7 +190,23 @@ fun HomeRoute(
         onCancelDownload = viewModel::cancelDownload,
         onRetryDownload = viewModel::retryDownload,
         onDelete = { pendingDeletion = it },
+        onOpenFolder = viewModel::openFolder,
+        onNavigateUp = viewModel::navigateUp,
+        onSearchQueryChange = viewModel::setSearchQuery,
+        onSort = viewModel::setSort,
+        onToggleSortDirection = viewModel::toggleSortDirection,
+        onCreateFolder = {
+            creatingFolder = true
+            nameInput = ""
+        },
+        onRename = {
+            pendingRename = it
+            nameInput = it.name
+        },
+        onMoveToRoot = viewModel::moveEntryToRoot,
+        onOpenFileDetail = { onOpenFileDetail(it.id) },
         snackbarHostState = snackbarHostState,
+        onOpenSettings = onOpenSettings,
         modifier = modifier,
     )
 }
@@ -143,6 +215,10 @@ fun HomeRoute(
 @OptIn(ExperimentalMaterial3Api::class)
 fun HomeScreen(
     entries: List<DirectoryEntry>,
+    breadcrumbs: List<Pair<String, String>>,
+    searchQuery: String,
+    sortMode: SortMode,
+    sortDirection: SortDirection,
     transfers: List<TransferTaskEntity>,
     loading: Boolean,
     isEnqueueing: Boolean,
@@ -154,12 +230,33 @@ fun HomeScreen(
     onCancelDownload: (String) -> Unit,
     onRetryDownload: (String) -> Unit,
     onDelete: (DirectoryEntry) -> Unit,
+    onOpenFolder: (String) -> Unit,
+    onNavigateUp: () -> Unit,
+    onSearchQueryChange: (String) -> Unit,
+    onSort: (SortMode) -> Unit,
+    onToggleSortDirection: () -> Unit,
+    onCreateFolder: () -> Unit,
+    onRename: (DirectoryEntry) -> Unit,
+    onMoveToRoot: (DirectoryEntry) -> Unit,
+    onOpenFileDetail: (DirectoryEntry) -> Unit,
     snackbarHostState: SnackbarHostState,
+    onOpenSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     Scaffold(
         modifier = modifier.fillMaxSize(),
-        topBar = { TopAppBar(title = { Text(stringResource(R.string.home_title)) }) },
+        topBar = {
+            TopAppBar(
+                title = { Text(stringResource(R.string.home_title)) },
+                navigationIcon = {
+                    if (breadcrumbs.size > 1) TextButton(onClick = onNavigateUp) { Text("上级") }
+                },
+                actions = {
+                    TextButton(onClick = onCreateFolder) { Text("新建") }
+                    TextButton(onClick = onOpenSettings) { Text("设置") }
+                },
+            )
+        },
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(onClick = onAddFile) {
@@ -179,6 +276,40 @@ fun HomeScreen(
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
+                item {
+                    Text(
+                        breadcrumbs.joinToString(" / ") { it.second }.ifBlank { "我的云盘" },
+                        style = MaterialTheme.typography.titleSmall,
+                    )
+                }
+                item {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = onSearchQueryChange,
+                        label = { Text("搜索文件和文件夹") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                item {
+                    Row(
+                        Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        listOf(
+                            SortMode.NAME to "名称",
+                            SortMode.SIZE to "大小",
+                            SortMode.UPDATED_AT to "时间",
+                        ).forEach { (mode, label) ->
+                            TextButton(onClick = { onSort(mode) }) {
+                                Text(if (sortMode == mode) "[$label]" else label)
+                            }
+                        }
+                        TextButton(onClick = onToggleSortDirection) {
+                            Text(if (sortDirection == SortDirection.ASCENDING) "升序" else "降序")
+                        }
+                    }
+                }
                 if (transfers.isNotEmpty()) {
                     item {
                         Text(
@@ -212,7 +343,16 @@ fun HomeScreen(
                     }
                 } else {
                     items(entries, key = { "entry:${it.id}" }) { entry ->
-                        EntryCard(entry, onDownload, onDelete)
+                        EntryCard(
+                            entry,
+                            onDownload,
+                            onDelete,
+                            onOpenFolder,
+                            onRename,
+                            onMoveToRoot,
+                            onOpenFileDetail,
+                            breadcrumbs.size > 1,
+                        )
                     }
                 }
                 if (isEnqueueing) {
@@ -233,19 +373,27 @@ private fun EntryCard(
     entry: DirectoryEntry,
     onDownload: (DirectoryEntry) -> Unit,
     onDelete: (DirectoryEntry) -> Unit,
+    onOpenFolder: (String) -> Unit,
+    onRename: (DirectoryEntry) -> Unit,
+    onMoveToRoot: (DirectoryEntry) -> Unit,
+    onOpenFileDetail: (DirectoryEntry) -> Unit,
+    canMoveToRoot: Boolean,
 ) {
     val downloadable = entry.kind == EntryKind.FILE &&
         entry.fileStatus in setOf(FileStatus.AVAILABLE, FileStatus.CORRUPTED)
-    val deletable = entry.kind == EntryKind.FILE && entry.fileStatus in setOf(
+    val deletable = entry.kind == EntryKind.FOLDER || entry.fileStatus in setOf(
         FileStatus.AVAILABLE,
         FileStatus.CORRUPTED,
         FileStatus.FAILED,
         FileStatus.PARTIALLY_DELETED,
     )
+    val opens = entry.kind == EntryKind.FOLDER || downloadable
     Card(
         modifier = Modifier
             .fillMaxWidth()
-            .clickable(enabled = downloadable) { onDownload(entry) },
+            .clickable(enabled = opens) {
+                if (entry.kind == EntryKind.FOLDER) onOpenFolder(entry.id) else onDownload(entry)
+            },
     ) {
         Column(Modifier.padding(16.dp)) {
             Text(entry.name, style = MaterialTheme.typography.titleSmall)
@@ -257,14 +405,28 @@ private fun EntryCard(
                 },
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
+            if (entry.kind == EntryKind.FILE) {
+                val context = LocalContext.current
+                Text(
+                    "${Formatter.formatShortFileSize(context, entry.sizeBytes)} · " +
+                        DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT)
+                            .format(Date(entry.updatedAtEpochMillis)),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
             if (downloadable) {
                 Text(
                     stringResource(R.string.tap_to_download),
                     color = MaterialTheme.colorScheme.primary,
                 )
             }
-            if (deletable) {
+            if (entry.kind == EntryKind.FILE && deletable) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onOpenFileDetail(entry) }) { Text("详情") }
+                    TextButton(onClick = { onRename(entry) }) { Text("重命名") }
+                    if (canMoveToRoot) {
+                        TextButton(onClick = { onMoveToRoot(entry) }) { Text("移到根目录") }
+                    }
                     TextButton(onClick = { onDelete(entry) }) {
                         Text(
                             stringResource(
@@ -276,6 +438,14 @@ private fun EntryCard(
                             ),
                         )
                     }
+                }
+            } else if (entry.kind == EntryKind.FOLDER) {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                    TextButton(onClick = { onRename(entry) }) { Text("重命名") }
+                    if (canMoveToRoot) {
+                        TextButton(onClick = { onMoveToRoot(entry) }) { Text("移到根目录") }
+                    }
+                    TextButton(onClick = { onDelete(entry) }) { Text("删除") }
                 }
             }
         }

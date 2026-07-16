@@ -16,6 +16,8 @@ import com.teledrive.lite.deletion.VerifiedDeletionIndexPublisher
 import com.teledrive.lite.deletion.LocalOrphanCleanupPublisher
 import com.teledrive.lite.deletion.OrphanCleanupScheduler
 import com.teledrive.lite.deletion.RoomOrphanCleanupStore
+import com.teledrive.lite.deletion.FolderDeletionScheduler
+import com.teledrive.lite.deletion.FolderDeletionServices
 import com.teledrive.lite.download.ContentResolverDownloadDestination
 import com.teledrive.lite.download.DownloadCoordinator
 import com.teledrive.lite.download.DownloadQueueRepository
@@ -35,6 +37,9 @@ import com.teledrive.lite.settings.SessionKeyStore
 import com.teledrive.lite.settings.SetupInitializationService
 import com.teledrive.lite.settings.SetupInitializer
 import com.teledrive.lite.settings.SharedPreferencesStringValueStore
+import com.teledrive.lite.settings.AppPreferences
+import com.teledrive.lite.settings.SettingsRepository
+import androidx.work.WorkManager
 import com.teledrive.lite.telegram.TelegramBotApiClient
 import com.teledrive.lite.sync.EncryptedIndexCandidateFactory
 import com.teledrive.lite.sync.FileIndexCandidateArtifactStore
@@ -45,6 +50,7 @@ import com.teledrive.lite.sync.RoomIndexLocalStore
 import com.teledrive.lite.sync.RoomIndexSnapshotSource
 import com.teledrive.lite.sync.TelegramIndexRemote
 import com.teledrive.lite.sync.PinnedIndexSnapshotReader
+import com.teledrive.lite.sync.RecoveryContextCommitter
 import com.teledrive.lite.telegram.TelegramApiException
 import com.teledrive.lite.telegram.TelegramFailure
 import java.io.File
@@ -68,6 +74,10 @@ class AppContainer(context: Context) {
     val database: TeleDriveDatabase = TeleDriveDatabase.create(applicationContext)
     val fileRepository = FileRepository(database)
     val transferRepository = TransferRepository(database)
+    val settingsRepository = SettingsRepository(database)
+    val appPreferences = AppPreferences(
+        applicationContext.getSharedPreferences("teledrive_user_preferences_v1", Context.MODE_PRIVATE),
+    )
     val uploadQueueRepository = UploadQueueRepository(database)
     val uploadStore = RoomUploadStore(database)
     val uploadScheduler = UploadScheduler(
@@ -84,6 +94,7 @@ class AppContainer(context: Context) {
     )
     val deletionScheduler = DeletionScheduler(applicationContext, fileRepository)
     val orphanCleanupScheduler = OrphanCleanupScheduler(applicationContext)
+    val folderDeletionScheduler = FolderDeletionScheduler(applicationContext)
 
     private val secureValues = SharedPreferencesStringValueStore(
         applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
@@ -111,6 +122,14 @@ class AppContainer(context: Context) {
         values = secureValues,
         configCipher = configCipher,
         sessionCipher = sessionCipher,
+    )
+
+    val maintenanceService = AppMaintenanceService(
+        database = database,
+        fileRepository = fileRepository,
+        setupStateStore = setupStateStore,
+        workManager = WorkManager.getInstance(applicationContext),
+        indexCandidateDirectory = File(applicationContext.filesDir, INDEX_CANDIDATE_DIRECTORY),
     )
 
     val setupInitializationService: SetupInitializationService = SetupInitializer(
@@ -148,6 +167,9 @@ class AppContainer(context: Context) {
                 remote = remote,
                 encryptedIndexCodec = encryptedCodec,
                 cacheReplacer = FileRepositoryIndexCacheReplacer(fileRepository),
+                contextCommitter = RecoveryContextCommitter { parameters, masterKey ->
+                    setupStateStore.commit(config, masterKey, parameters)
+                },
             ),
         )
     }
@@ -251,6 +273,12 @@ class AppContainer(context: Context) {
                 },
             ),
         )
+    }
+
+    fun createFolderDeletionServices(): FolderDeletionServices? {
+        val deletion = createDeletionServices() ?: return null
+        val cloud = createCloudIndexServices() ?: return null
+        return FolderDeletionServices(fileRepository, deletion.coordinator, cloud.updater)
     }
 
     private companion object {

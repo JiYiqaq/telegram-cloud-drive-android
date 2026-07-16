@@ -73,10 +73,36 @@ class IndexRecoveryServiceTest {
         assertEquals(null, cache.snapshot)
     }
 
-    private fun service(remote: IndexRecoveryRemote, cache: IndexCacheReplacer) = IndexRecoveryService(
+    @Test
+    fun rebindsValidatedRemoteKeyBeforeReplacingCache() = runBlocking {
+        val fixture = fixture(messageId = 71)
+        val order = mutableListOf<String>()
+        val cache = object : IndexCacheReplacer {
+            override suspend fun replace(snapshot: CloudCacheSnapshot) {
+                order += "cache"
+            }
+        }
+        val committer = RecoveryContextCommitter { parameters, masterKey ->
+            assertEquals(KeyDerivation.ALGORITHM, parameters.algorithm)
+            assertEquals(KeyDerivation.MASTER_KEY_BYTES, masterKey.size)
+            order += "key"
+        }
+
+        service(FakeRecoveryRemote(fixture.document, fixture.envelope), cache, committer)
+            .recover(PASSWORD.copyOf())
+
+        assertEquals(listOf("key", "cache"), order)
+    }
+
+    private fun service(
+        remote: IndexRecoveryRemote,
+        cache: IndexCacheReplacer,
+        committer: RecoveryContextCommitter? = null,
+    ) = IndexRecoveryService(
         remote = remote,
         encryptedIndexCodec = EncryptedIndexCodec(CloudIndexEnvelopeCryptor(CryptoEngine())),
         cacheReplacer = cache,
+        contextCommitter = committer,
         clock = { 3_000 },
     )
 

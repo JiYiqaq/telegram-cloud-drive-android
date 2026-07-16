@@ -16,13 +16,24 @@ import androidx.compose.material3.Surface
 import androidx.compose.ui.Modifier
 import com.teledrive.lite.navigation.TeleDriveNavHost
 import com.teledrive.lite.ui.theme.TeleDriveTheme
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.compose.runtime.getValue
+import com.teledrive.lite.settings.ThemeMode
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            TeleDriveTheme {
+            val container = (application as TeleDriveApplication).container
+            val themeMode by container.appPreferences.themeMode.collectAsStateWithLifecycle()
+            TeleDriveTheme(
+                darkThemeOverride = when (themeMode) {
+                    ThemeMode.SYSTEM -> null
+                    ThemeMode.LIGHT -> false
+                    ThemeMode.DARK -> true
+                },
+            ) {
                 Surface(
                     modifier = Modifier
                         .fillMaxSize()
@@ -30,7 +41,7 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background,
                 ) {
                     TeleDriveNavHost(
-                        container = (application as TeleDriveApplication).container,
+                        container = container,
                     )
                 }
             }
