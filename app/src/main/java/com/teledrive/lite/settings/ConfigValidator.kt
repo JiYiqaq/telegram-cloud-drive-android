@@ -32,7 +32,7 @@ data class ConfigValidationResult(
 }
 
 object ConfigValidator {
-    const val MIN_PASSWORD_LENGTH: Int = 12
+    const val MIN_PASSWORD_LENGTH: Int = 8
 
     private val botTokenPattern = Regex(
         pattern = """^\d{5,}:AA[A-Za-z0-9_-]{20,}$""",

@@ -58,10 +58,12 @@ class ConfigValidatorTest {
     }
 
     @Test
-    fun passwordRequiresTwelveNonWhitespaceCharacters() {
-        val tooShort = validRequest(password = "Short-42!", confirmation = "Short-42!")
+    fun passwordRequiresEightNonWhitespaceCharacters() {
+        val minimumLength = validRequest(password = "Abcd12!x", confirmation = "Abcd12!x")
+        val tooShort = validRequest(password = "Abc12!x", confirmation = "Abc12!x")
         val blank = validRequest(password = "            ", confirmation = "            ")
 
+        assertTrue(minimumLength.isValid)
         assertTrue(tooShort.errors.contains(ConfigValidationError.PASSWORD_TOO_SHORT))
         assertTrue(blank.errors.contains(ConfigValidationError.PASSWORD_REQUIRED))
         assertFalse(blank.errors.contains(ConfigValidationError.PASSWORD_TOO_SHORT))

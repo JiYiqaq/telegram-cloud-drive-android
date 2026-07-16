@@ -2,6 +2,12 @@
 
 All notable changes follow semantic versioning. This project is pre-release software.
 
+## [Unreleased]
+
+### Changed
+
+- Lowered the minimum sync-password length from 12 to 8 characters
+
 ## [0.1.0-alpha] - 2026-07-16
 
 ### Added
