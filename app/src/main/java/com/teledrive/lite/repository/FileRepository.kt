@@ -144,7 +144,7 @@ class FileRepository(
             folderId = folderId,
             breadcrumbs = breadcrumbs,
             entries = DirectoryEntrySorter.sort(
-                (childFolders + childFiles).toList(),
+                DirectoryEntryVisibility.filter((childFolders + childFiles).toList()),
                 sortMode,
                 sortDirection,
             ),
@@ -156,7 +156,9 @@ class FileRepository(
         if (normalized.isEmpty()) return flowOf(emptyList())
         return combine(folderDao.search(normalized), fileDao.search(normalized)) { folders, files ->
             DirectoryEntrySorter.sort(
-                folders.map { it.toDirectoryEntry() } + files.map { it.toDirectoryEntry() },
+                DirectoryEntryVisibility.filter(
+                    folders.map { it.toDirectoryEntry() } + files.map { it.toDirectoryEntry() },
+                ),
                 SortMode.NAME,
                 SortDirection.ASCENDING,
             )
