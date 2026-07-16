@@ -1,5 +1,6 @@
 package com.teledrive.lite.settings
 
+import android.annotation.SuppressLint
 import android.content.SharedPreferences
 import com.teledrive.lite.transfer.StreamingChunker
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -11,6 +12,7 @@ enum class ThemeMode {
     DARK,
 }
 
+@SuppressLint("UseKtx") // commit() result is required so failed preference writes are observable.
 class AppPreferences(
     private val preferences: SharedPreferences,
 ) {

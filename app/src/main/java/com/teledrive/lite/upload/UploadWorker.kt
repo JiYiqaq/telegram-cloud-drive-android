@@ -184,7 +184,6 @@ class UploadWorker(
     }
 
     private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = applicationContext.getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(

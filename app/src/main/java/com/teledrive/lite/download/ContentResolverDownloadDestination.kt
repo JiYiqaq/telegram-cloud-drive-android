@@ -2,13 +2,14 @@ package com.teledrive.lite.download
 
 import android.content.ContentResolver
 import android.net.Uri
+import androidx.core.net.toUri
 import java.io.OutputStream
 
 class ContentResolverDownloadDestination(
     private val contentResolver: ContentResolver,
 ) : DownloadDestination {
     override fun open(destinationUri: String): DownloadOutput {
-        val uri = Uri.parse(destinationUri)
+        val uri = destinationUri.toUri()
         if (uri.scheme != ContentResolver.SCHEME_CONTENT) {
             throw DownloadException(DownloadFailure.DESTINATION_UNAVAILABLE)
         }

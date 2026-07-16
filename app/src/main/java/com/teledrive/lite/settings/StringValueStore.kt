@@ -1,5 +1,6 @@
 package com.teledrive.lite.settings
 
+import android.annotation.SuppressLint
 import android.content.SharedPreferences
 
 interface StringValueStore {
@@ -10,6 +11,7 @@ interface StringValueStore {
     fun remove(keys: Set<String>): Boolean
 }
 
+@SuppressLint("UseKtx") // The store contract returns commit() success for atomic setup writes.
 class SharedPreferencesStringValueStore(
     private val preferences: SharedPreferences,
 ) : StringValueStore {

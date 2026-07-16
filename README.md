@@ -76,10 +76,11 @@ Bot API 不能可靠遍历私人频道全部历史，因此应用不扫描历史
 
 ## Telegram Bot API 限制
 
+- 截至 2026-07-16，官方文档说明 [`getFile`](https://core.telegram.org/bots/api#getfile) 下载上限为 20 MB，[`sendDocument`](https://core.telegram.org/bots/api#senddocument) multipart 上传上限为 50 MB。
 - 当前安全默认块为 18 MiB；加密块必须严格小于 20,000,000 字节下载边界。
 - 同时只上传一个文件，块按序发送，避免触发限流。
 - 幂等读取可有限重试；非幂等上传结果未知时不会盲目重发。
-- Bot 必须是私人频道管理员，并具备发送、编辑/置顶和删除消息权限。
+- Bot 必须是私人频道管理员，并具备发送、编辑/置顶和删除消息权限；置顶要求以官方 [`pinChatMessage`](https://core.telegram.org/bots/api#pinchatmessage) 权限说明为准。
 - Telegram 服务限制或策略可能变化；发布前应复核官方 Bot API 文档。
 
 ## 系统要求
