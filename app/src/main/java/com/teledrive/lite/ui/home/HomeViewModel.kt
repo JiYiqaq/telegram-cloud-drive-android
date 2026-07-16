@@ -166,7 +166,7 @@ class HomeViewModel(
         viewModelScope.launch {
             message.value = try {
                 deletionScheduler.enqueue(fileId)
-                "安全删除任务已开始"
+                HomePresentation.deletionMessage(queuedFiles = 1, queuedFolders = 0, failed = 0)
             } catch (_: Exception) {
                 "无法开始删除；若为部分删除文件，请稍后重试"
             }
@@ -181,7 +181,8 @@ class HomeViewModel(
         val distinctEntries = entries.distinctBy(DirectoryEntry::id)
         if (distinctEntries.isEmpty()) return
         viewModelScope.launch {
-            var queued = 0
+            var queuedFiles = 0
+            var queuedFolders = 0
             distinctEntries.forEach { entry ->
                 runCatching {
                     if (entry.kind == EntryKind.FILE) {
@@ -189,13 +190,15 @@ class HomeViewModel(
                     } else {
                         folderDeletionScheduler.enqueue(entry.id)
                     }
-                }.onSuccess { queued += 1 }
+                }.onSuccess {
+                    if (entry.kind == EntryKind.FILE) queuedFiles += 1 else queuedFolders += 1
+                }
             }
-            message.value = when {
-                queued == distinctEntries.size -> "已开始安全删除 $queued 项"
-                queued > 0 -> "已开始删除 $queued 项，${distinctEntries.size - queued} 项无法加入队列"
-                else -> "无法开始批量删除"
-            }
+            message.value = HomePresentation.deletionMessage(
+                queuedFiles = queuedFiles,
+                queuedFolders = queuedFolders,
+                failed = distinctEntries.size - queuedFiles - queuedFolders,
+            )
         }
     }
 
