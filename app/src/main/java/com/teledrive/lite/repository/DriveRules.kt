@@ -20,6 +20,20 @@ object DriveNameEquivalence {
     private const val ASCII_CASE_OFFSET = 'a'.code - 'A'.code
 }
 
+data class CloudIndexIdentity(
+    val revision: Long,
+    val currentMessageId: Long?,
+    val currentFileId: String?,
+    val previousMessageId: Long?,
+)
+
+enum class CloudCacheReplacementDecision {
+    REPLACE,
+    KEEP_CURRENT,
+    REJECT_STALE,
+    REJECT_FORK,
+}
+
 object CloudCacheReplacementPolicy {
     fun mustPreserveLocalState(
         hasLocalOnlyFiles: Boolean,
@@ -28,6 +42,32 @@ object CloudCacheReplacementPolicy {
     ): Boolean = hasLocalOnlyFiles ||
         hasUncoveredPendingOperations ||
         currentIndexSyncStatus in UNSAFE_REPLACEMENT_STATES
+
+    fun decide(
+        current: CloudIndexIdentity?,
+        incoming: CloudIndexIdentity,
+    ): CloudCacheReplacementDecision {
+        current ?: return CloudCacheReplacementDecision.REPLACE
+        if (incoming.revision < current.revision) {
+            return CloudCacheReplacementDecision.REJECT_STALE
+        }
+        if (incoming.revision == current.revision) {
+            return if (
+                incoming.currentMessageId == current.currentMessageId &&
+                incoming.currentFileId == current.currentFileId
+            ) {
+                CloudCacheReplacementDecision.KEEP_CURRENT
+            } else {
+                CloudCacheReplacementDecision.REJECT_FORK
+            }
+        }
+        val isImmediateSuccessor = current.revision != Long.MAX_VALUE &&
+            incoming.revision == current.revision + 1
+        if (isImmediateSuccessor && incoming.previousMessageId != current.currentMessageId) {
+            return CloudCacheReplacementDecision.REJECT_FORK
+        }
+        return CloudCacheReplacementDecision.REPLACE
+    }
 
     private val UNSAFE_REPLACEMENT_STATES = setOf(
         IndexSyncStatus.DIRTY,

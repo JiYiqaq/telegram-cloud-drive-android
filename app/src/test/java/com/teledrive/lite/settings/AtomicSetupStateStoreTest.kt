@@ -4,6 +4,7 @@ import com.teledrive.lite.crypto.KeyDerivationParameters
 import org.junit.Assert.assertArrayEquals
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertThrows
 import org.junit.Test
 
 class AtomicSetupStateStoreTest {
@@ -48,6 +49,25 @@ class AtomicSetupStateStoreTest {
 
         assertEquals(0, values.putCalls)
         assertEquals(oldValues, values.data)
+    }
+
+    @Test
+    fun combinedCryptoContextRejectsMasterKeyAndKdfFieldsFromDifferentGenerations() {
+        val values = CountingValues()
+        val store = AtomicSetupStateStore(values, CopyCipher(), CopyCipher())
+        val masterKey = ByteArray(32) { (it + 7).toByte() }
+        val parameters = KeyDerivationParameters.pbkdf2(ByteArray(16) { it.toByte() }, 600_000)
+        store.commit(ValidatedConnectionConfig("token", -1001234567890), masterKey, parameters)
+
+        store.loadCryptoContext()?.use { context ->
+            context.withMasterKey { restored -> assertArrayEquals(masterKey, restored) }
+        }
+
+        values.data[KdfParametersStore.SALT_KEY] = ByteArray(16) { 99 }.toBase64()
+        val failure = assertThrows(SecureStorageException::class.java) {
+            store.loadCryptoContext()
+        }
+        assertEquals(SecureStorageFailure.CORRUPTED, failure.failure)
     }
 
     private class CountingValues(

@@ -47,6 +47,8 @@ enum class DriveRepositoryFailure(val chineseMessage: String) {
     DELETE_OPERATION_REQUIRED("缺少与该文件绑定的删除操作记录。"),
     ACTIVE_TRANSFER_EXISTS("仍有活动传输任务，不能替换或清理缓存。"),
     LOCAL_RECOVERY_DATA_EXISTS("存在尚未同步或待清理的本地数据，已拒绝覆盖缓存。"),
+    STALE_CLOUD_SNAPSHOT("云端索引版本早于本地稳定版本，已拒绝回退。"),
+    CLOUD_INDEX_CONFLICT("检测到同版本分叉或前序索引不匹配，已停止同步。"),
 }
 
 class DriveRepositoryException(
@@ -324,7 +326,7 @@ class FileRepository(
             val now = clock()
             if (folderDao.deleteById(folderId) != 1) fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
             recordPendingMutation(
-                PendingOperationType.DELETE,
+                PendingOperationType.DELETE_FOLDER,
                 folderId,
                 mutationPayload("parentId" to checkNotNull(folder.parentId)),
                 now,
@@ -610,6 +612,35 @@ class FileRepository(
                 )
             ) {
                 fail(DriveRepositoryFailure.LOCAL_RECOVERY_DATA_EXISTS)
+            }
+            val replacementDecision = CloudCacheReplacementPolicy.decide(
+                current = currentIndex
+                    ?.takeIf { it.syncStatus == IndexSyncStatus.SYNCED }
+                    ?.let {
+                        CloudIndexIdentity(
+                            revision = it.revision,
+                            currentMessageId = it.currentIndexMessageId,
+                            currentFileId = it.currentIndexFileId,
+                            previousMessageId = it.previousIndexMessageId,
+                        )
+                    },
+                incoming = CloudIndexIdentity(
+                    revision = snapshot.indexState.revision,
+                    currentMessageId = snapshot.indexState.currentIndexMessageId,
+                    currentFileId = snapshot.indexState.currentIndexFileId,
+                    previousMessageId = snapshot.indexState.previousIndexMessageId,
+                ),
+            )
+            when (replacementDecision) {
+                CloudCacheReplacementDecision.REPLACE -> Unit
+                CloudCacheReplacementDecision.KEEP_CURRENT -> return@withTransaction
+                CloudCacheReplacementDecision.REJECT_STALE -> {
+                    fail(DriveRepositoryFailure.STALE_CLOUD_SNAPSHOT)
+                }
+
+                CloudCacheReplacementDecision.REJECT_FORK -> {
+                    fail(DriveRepositoryFailure.CLOUD_INDEX_CONFLICT)
+                }
             }
             pendingOperationDao.deleteAll()
             chunkDao.deleteAll()

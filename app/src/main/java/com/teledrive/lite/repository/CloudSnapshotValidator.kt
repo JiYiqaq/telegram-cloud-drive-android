@@ -11,6 +11,7 @@ import com.teledrive.lite.model.IndexSyncStatus
 import com.teledrive.lite.model.PendingOperationType
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.long
 
@@ -36,9 +37,21 @@ object CloudSnapshotValidator {
             indexState.id != IndexStateEntity.SINGLETON_ID ||
             indexState.rootFolderId != FolderTreeValidator.ROOT_ID ||
             indexState.syncStatus != IndexSyncStatus.SYNCED ||
+            indexState.revision < 1 ||
             indexState.currentIndexMessageId == null ||
+            indexState.currentIndexMessageId <= 0 ||
             indexState.currentIndexFileId.isNullOrBlank() ||
-            indexState.lastSyncedAtEpochMillis == null
+            indexState.lastSyncedAtEpochMillis == null ||
+            indexState.lastSyncedAtEpochMillis <= 0 ||
+            (indexState.revision == 1L && indexState.previousIndexMessageId != null) ||
+            (
+                indexState.revision > 1L &&
+                    (
+                        indexState.previousIndexMessageId == null ||
+                            indexState.previousIndexMessageId <= 0 ||
+                            indexState.previousIndexMessageId >= indexState.currentIndexMessageId
+                        )
+                )
         ) {
             fail()
         }
@@ -160,6 +173,23 @@ object CloudSnapshotValidator {
                     if (
                         (operation.targetId !in folderIds && operation.targetId !in fileIds) ||
                         operation.payloadJson == null
+                    ) {
+                        fail()
+                    }
+                }
+
+                PendingOperationType.DELETE_FOLDER -> {
+                    val payload = try {
+                        Json.parseToJsonElement(checkNotNull(operation.payloadJson)).jsonObject
+                    } catch (_: Exception) {
+                        fail()
+                    }
+                    if (
+                        operation.targetId in folderIds ||
+                        operation.targetId in fileIds ||
+                        payload.keys != setOf("parentId") ||
+                        payload.getValue("parentId").jsonPrimitive.content !in folderIds ||
+                        operation.remainingMessageIdsJson != null
                     ) {
                         fail()
                     }

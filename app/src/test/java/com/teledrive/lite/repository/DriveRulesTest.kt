@@ -77,6 +77,53 @@ class DriveRulesTest {
     }
 
     @Test
+    fun cacheReplacementRejectsDowngradesAndRevisionForks() {
+        val current = CloudIndexIdentity(
+            revision = 3,
+            currentMessageId = 30,
+            currentFileId = "index-3",
+            previousMessageId = 20,
+        )
+
+        assertEquals(
+            CloudCacheReplacementDecision.REJECT_STALE,
+            CloudCacheReplacementPolicy.decide(current, current.copy(revision = 2)),
+        )
+        assertEquals(
+            CloudCacheReplacementDecision.KEEP_CURRENT,
+            CloudCacheReplacementPolicy.decide(current, current),
+        )
+        assertEquals(
+            CloudCacheReplacementDecision.REJECT_FORK,
+            CloudCacheReplacementPolicy.decide(
+                current,
+                current.copy(currentMessageId = 31, currentFileId = "fork"),
+            ),
+        )
+        assertEquals(
+            CloudCacheReplacementDecision.REJECT_FORK,
+            CloudCacheReplacementPolicy.decide(
+                current,
+                CloudIndexIdentity(4, 40, "index-4", previousMessageId = 29),
+            ),
+        )
+        assertEquals(
+            CloudCacheReplacementDecision.REPLACE,
+            CloudCacheReplacementPolicy.decide(
+                current,
+                CloudIndexIdentity(4, 40, "index-4", previousMessageId = 30),
+            ),
+        )
+        assertEquals(
+            CloudCacheReplacementDecision.REPLACE,
+            CloudCacheReplacementPolicy.decide(
+                current,
+                CloudIndexIdentity(6, 60, "index-6", previousMessageId = 50),
+            ),
+        )
+    }
+
+    @Test
     fun fileStateMachineAllowsLifecycleAndRejectsBackwardsTransition() {
         assertTrue(FileStateMachine.canTransition(FileStatus.PENDING, FileStatus.ENCRYPTING))
         assertTrue(FileStateMachine.canTransition(FileStatus.ENCRYPTING, FileStatus.UPLOADING))

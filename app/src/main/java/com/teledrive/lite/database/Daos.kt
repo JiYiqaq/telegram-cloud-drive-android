@@ -113,6 +113,9 @@ interface FileDao {
 
 @Dao
 interface ChunkDao {
+    @Query("SELECT * FROM chunks ORDER BY file_id, part_index, id")
+    suspend fun getAll(): List<ChunkEntity>
+
     @Query("SELECT * FROM chunks WHERE file_id = :fileId ORDER BY part_index")
     fun observeForFile(fileId: String): Flow<List<ChunkEntity>>
 

@@ -13,6 +13,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import okhttp3.FormBody
 import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrl
@@ -28,7 +30,7 @@ class TelegramBotApiClient(
     private val apiBaseUrl: HttpUrl = DEFAULT_API_BASE_URL,
     private val fileBaseUrl: HttpUrl = DEFAULT_FILE_BASE_URL,
     private val retryPolicy: RetryPolicy = RetryPolicy(),
-) : TelegramGateway {
+) : TelegramStorageGateway {
     private val json = Json {
         ignoreUnknownKeys = true
         explicitNulls = false
@@ -121,21 +123,21 @@ class TelegramBotApiClient(
             idempotent = false,
         )
 
-    suspend fun pinChatMessage(chatId: Long, messageId: Long): Boolean =
+    override suspend fun pinChatMessage(chatId: Long, messageId: Long): Boolean =
         executeMethod(
             method = "pinChatMessage",
             body = form("chat_id" to chatId.toString(), "message_id" to messageId.toString()),
             idempotent = false,
         )
 
-    suspend fun unpinChatMessage(chatId: Long, messageId: Long): Boolean =
+    override suspend fun unpinChatMessage(chatId: Long, messageId: Long): Boolean =
         executeMethod(
             method = "unpinChatMessage",
             body = form("chat_id" to chatId.toString(), "message_id" to messageId.toString()),
             idempotent = false,
         )
 
-    suspend fun sendDocument(
+    override suspend fun sendDocument(
         chatId: Long,
         fileName: String,
         contentLength: Long,
@@ -169,7 +171,54 @@ class TelegramBotApiClient(
         )
     }
 
-    suspend fun getFile(fileId: String): RemoteFile {
+    override suspend fun editDocument(
+        chatId: Long,
+        messageId: Long,
+        fileName: String,
+        contentLength: Long,
+        openStream: () -> java.io.InputStream,
+    ): SentDocument {
+        require(messageId > 0)
+        require(fileName.isNotBlank() && '/' !in fileName && '\\' !in fileName)
+        require(
+            TelegramCloudLimits.isEncryptedChunkSizeSafe(contentLength),
+        ) { "Encrypted document exceeds the cloud download safety boundary" }
+        val requestBody = StreamingRequestBody(
+            mediaType = OCTET_STREAM,
+            declaredLength = contentLength,
+            openStream = openStream,
+        )
+        val media = buildJsonObject {
+            put("type", "document")
+            put("media", "attach://document")
+            put("disable_content_type_detection", true)
+        }.toString()
+        val multipart = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("chat_id", chatId.toString())
+            .addFormDataPart("message_id", messageId.toString())
+            .addFormDataPart("media", media)
+            .addFormDataPart("document", fileName, requestBody)
+            .build()
+        val message = executeMethod<TelegramMessageDto>(
+            method = "editMessageMedia",
+            body = multipart,
+            idempotent = false,
+        )
+        val document = message.document
+            ?: throw TelegramApiException(TelegramFailure.InvalidResponse)
+        if (message.messageId != messageId) {
+            throw TelegramApiException(TelegramFailure.InvalidResponse)
+        }
+        return SentDocument(
+            messageId = message.messageId,
+            fileId = document.fileId,
+            fileUniqueId = document.fileUniqueId,
+            size = document.fileSize,
+        )
+    }
+
+    override suspend fun getFile(fileId: String): RemoteFile {
         val file = executeMethod<TelegramFileDto>(
             method = "getFile",
             body = form("file_id" to fileId),
@@ -185,7 +234,7 @@ class TelegramBotApiClient(
         )
     }
 
-    suspend fun downloadFile(filePath: String, output: OutputStream): Long {
+    override suspend fun downloadFile(filePath: String, output: OutputStream): Long {
         require(filePath.isSafeFilePath())
         val urlBuilder = fileBaseUrl.newBuilder().addPathSegment("bot$token")
         filePath.split('/').forEach(urlBuilder::addPathSegment)

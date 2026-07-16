@@ -41,6 +41,7 @@ enum class PendingOperationType {
     CREATE_FOLDER,
     RENAME,
     MOVE,
+    DELETE_FOLDER,
     DELETE,
     INDEX_UPDATE,
 }

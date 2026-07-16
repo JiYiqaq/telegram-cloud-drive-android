@@ -148,6 +148,60 @@ class CloudSnapshotValidatorTest {
         assertEquals(DriveRepositoryFailure.INVALID_CLOUD_SNAPSHOT, error.failure)
     }
 
+    @Test
+    fun indexRevisionAndMessageChainMustBeInternallyConsistent() {
+        val valid = validSnapshot()
+        val invalidStates = listOf(
+            valid.indexState.copy(revision = 0),
+            valid.indexState.copy(previousIndexMessageId = 7),
+            valid.indexState.copy(revision = 2, previousIndexMessageId = null),
+            valid.indexState.copy(currentIndexMessageId = 0),
+            valid.indexState.copy(
+                revision = 2,
+                previousIndexMessageId = valid.indexState.currentIndexMessageId,
+            ),
+        )
+
+        invalidStates.forEach { indexState ->
+            val error = assertThrows(DriveRepositoryException::class.java) {
+                CloudSnapshotValidator.requireValid(valid.copy(indexState = indexState))
+            }
+            assertEquals(DriveRepositoryFailure.INVALID_CLOUD_SNAPSHOT, error.failure)
+        }
+    }
+
+    @Test
+    fun folderDeletionTombstoneReferencesAnExistingFormerParent() {
+        val valid = validSnapshot()
+        val operation = PendingOperationEntity(
+            id = "00000000-0000-0000-0000-000000000099",
+            type = PendingOperationType.DELETE_FOLDER,
+            targetId = "00000000-0000-0000-0000-000000000098",
+            payloadJson = "{\"parentId\":\"root\"}",
+            remainingMessageIdsJson = null,
+            baseRevision = 1,
+            candidateRevision = null,
+            indexConfirmedAtEpochMillis = null,
+            status = PendingOperationStatus.PENDING,
+            attempt = 0,
+            nextRetryAtEpochMillis = null,
+            errorCode = null,
+            createdAtEpochMillis = 2,
+            updatedAtEpochMillis = 2,
+        )
+
+        CloudSnapshotValidator.requireValid(valid.copy(pendingOperations = listOf(operation)))
+        assertThrows(DriveRepositoryException::class.java) {
+            CloudSnapshotValidator.requireValid(
+                valid.copy(
+                    pendingOperations = listOf(
+                        operation.copy(payloadJson = "{\"parentId\":\"missing\"}"),
+                    ),
+                ),
+            )
+        }
+    }
+
     private fun validSnapshot(): CloudCacheSnapshot = CloudCacheSnapshot(
         folders = listOf(FolderEntity("root", "我的云盘", null, 1, 1)),
         files = listOf(

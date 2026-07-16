@@ -173,6 +173,33 @@ class TelegramBotApiClientTest {
     }
 
     @Test
+    fun editDocumentUploadsReplacementMediaWithoutChangingMessageIdentity() = runBlocking {
+        server.enqueue(
+            jsonResponse(
+                """{"ok":true,"result":{"message_id":77,"date":1700000000,"chat":{"id":-1001234567890,"type":"channel","title":"Private Store"},"document":{"file_name":"teledrive_index_v1.bin","mime_type":"application/octet-stream","file_id":"FINAL_INDEX_FILE","file_unique_id":"FINAL_UNIQUE","file_size":64}}}""",
+            ),
+        )
+        val payload = "final-self-referencing-index".encodeToByteArray()
+
+        val result = newClient().editDocument(
+            chatId = CHAT_ID,
+            messageId = 77,
+            fileName = "teledrive_index_v1.bin",
+            contentLength = payload.size.toLong(),
+            openStream = { ByteArrayInputStream(payload) },
+        )
+
+        assertEquals(77L, result.messageId)
+        assertEquals("FINAL_INDEX_FILE", result.fileId)
+        val request = server.takeRequest()
+        assertEquals("/botYOUR_BOT_TOKEN/editMessageMedia", request.target)
+        val multipart = request.body?.utf8().orEmpty()
+        assertTrue(multipart.contains("attach://document"))
+        assertTrue(multipart.contains("teledrive_index_v1.bin"))
+        assertTrue(multipart.contains("final-self-referencing-index"))
+    }
+
+    @Test
     fun getFileThenDownloadStreamsWithoutExposingPermanentUrl() = runBlocking {
         server.enqueue(
             jsonResponse(
