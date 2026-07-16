@@ -47,6 +47,9 @@ google-services.json
 
 # Logs and crash reports
 *.log
+*.db
+*.db-shm
+*.db-wal
 hs_err_pid*
 
 # Operating-system files
@@ -59,3 +62,11 @@ Desktop.ini
 *.swo
 *~
 .vscode/
+
+# User data and private work areas
+private/
+downloads/
+uploads/
+cache/
+app/release/
+app/debug/

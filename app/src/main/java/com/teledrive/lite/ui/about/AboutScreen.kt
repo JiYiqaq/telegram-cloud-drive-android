@@ -34,7 +34,7 @@ fun AboutScreen(onBack: () -> Unit) {
         ) {
             Text("TeleDrive Lite", style = MaterialTheme.typography.headlineSmall)
             Text("版本 ${BuildConfig.VERSION_NAME} (${BuildConfig.VERSION_CODE})")
-            Text("GitHub：github.com/OWNER/telegram-cloud-drive-android")
+            Text("GitHub：github.com/JiYiqaq/telegram-cloud-drive-android")
             Text("许可证：Apache License 2.0")
             Text("本项目由 OpenAI Codex 根据项目维护者提供的需求协助设计和实现。项目维护者负责需求定义、代码审查、测试、发布和后续维护。")
             Text("本项目不是 Telegram 官方产品，也不是 OpenAI 官方产品。")
