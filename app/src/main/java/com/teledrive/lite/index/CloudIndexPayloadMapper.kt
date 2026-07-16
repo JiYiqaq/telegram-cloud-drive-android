@@ -34,6 +34,11 @@ object CloudIndexPayloadMapper {
         updatedAtEpochMillis: Long,
         keyDerivation: KeyDerivationParameters,
     ): CloudIndexPayload {
+        val chunksByFile = snapshot.chunks.groupBy(ChunkEntity::fileId)
+        val publishedFiles = snapshot.files.filter { file ->
+            file.isCloudIndexed || isCompleteUploadCandidate(file, chunksByFile[file.id].orEmpty())
+        }
+        val publishedFileIds = publishedFiles.map(FileEntity::id).toSet()
         val payload = CloudIndexPayload(
             schema = CloudIndexPayload.SCHEMA,
             formatVersion = CloudIndexPayload.CURRENT_FORMAT_VERSION,
@@ -55,8 +60,12 @@ object CloudIndexPayloadMapper {
                 file = AES_GCM_PARAMETERS,
             ),
             folders = snapshot.folders.map { it.toIndexFolder() },
-            files = snapshot.files.map { it.toIndexFile() },
-            chunks = snapshot.chunks.map { it.toIndexChunk() },
+            files = publishedFiles.map { file ->
+                file.toIndexFile(candidateUploadedAtEpochMillis = updatedAtEpochMillis)
+            },
+            chunks = snapshot.chunks
+                .filter { it.fileId in publishedFileIds }
+                .map { it.toIndexChunk() },
             pendingOperations = snapshot.pendingOperations
                 .filter { it.type != PendingOperationType.INDEX_UPDATE }
                 .map { it.toIndexPendingOperation() },
@@ -102,22 +111,22 @@ object CloudIndexPayloadMapper {
         updatedAtEpochMillis = updatedAtEpochMillis,
     )
 
-    private fun FileEntity.toIndexFile() = IndexFile(
+    private fun FileEntity.toIndexFile(candidateUploadedAtEpochMillis: Long) = IndexFile(
         id = id,
         name = name,
         mimeType = mimeType,
         sizeBytes = sizeBytes,
         createdAtEpochMillis = createdAtEpochMillis,
         modifiedAtEpochMillis = modifiedAtEpochMillis,
-        uploadedAtEpochMillis = requireNotNull(uploadedAtEpochMillis),
+        uploadedAtEpochMillis = uploadedAtEpochMillis ?: candidateUploadedAtEpochMillis,
         parentFolderId = parentFolderId,
         sha256 = requireNotNull(sha256),
         encryptionFormatVersion = encryptionFormatVersion,
         chunkSizeBytes = chunkSizeBytes,
         chunkCount = chunkCount,
         wrappedDataKey = IndexBytes.of(requireNotNull(wrappedDataKey)),
-        status = status.toIndexStatus(),
-        isCloudIndexed = isCloudIndexed,
+        status = if (isCloudIndexed) status.toIndexStatus() else IndexFileStatus.AVAILABLE,
+        isCloudIndexed = true,
     )
 
     private fun ChunkEntity.toIndexChunk() = IndexChunk(
@@ -273,6 +282,28 @@ object CloudIndexPayloadMapper {
 
     private fun longListJson(values: List<Long>): String =
         JsonArray(values.sorted().map(::JsonPrimitive)).toString()
+
+    private fun isCompleteUploadCandidate(
+        file: FileEntity,
+        chunks: List<ChunkEntity>,
+    ): Boolean {
+        if (
+            file.isCloudIndexed ||
+            file.status != FileStatus.UPLOADING ||
+            file.uploadedAtEpochMillis != null ||
+            file.sha256?.matches(Regex("^[0-9a-f]{64}$")) != true ||
+            file.wrappedDataKey?.size != 66 ||
+            chunks.size != file.chunkCount
+        ) {
+            return false
+        }
+        return chunks.all { chunk ->
+            chunk.uploadStatus == ChunkUploadStatus.UPLOADED &&
+                chunk.messageId != null &&
+                !chunk.telegramFileId.isNullOrBlank() &&
+                chunk.nonce?.size == 12
+        }
+    }
 
     private val AES_GCM_PARAMETERS = AesGcmParameters(
         algorithm = "AES-256-GCM",

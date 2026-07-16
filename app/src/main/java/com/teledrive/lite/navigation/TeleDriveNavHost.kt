@@ -13,7 +13,9 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.teledrive.lite.app.AppContainer
-import com.teledrive.lite.ui.home.HomeScreen
+import com.teledrive.lite.ui.home.HomeRoute
+import com.teledrive.lite.ui.home.HomeViewModel
+import com.teledrive.lite.ui.home.HomeViewModelFactory
 import com.teledrive.lite.ui.setup.SetupRoute
 import com.teledrive.lite.ui.setup.SetupViewModel
 import com.teledrive.lite.ui.setup.SetupViewModelFactory
@@ -62,7 +64,14 @@ fun TeleDriveNavHost(
             TutorialScreen(onBack = navController::popBackStack)
         }
         composable(Routes.Home) {
-            HomeScreen()
+            val homeViewModel: HomeViewModel = viewModel(
+                factory = HomeViewModelFactory(
+                    fileRepository = container.fileRepository,
+                    transferRepository = container.transferRepository,
+                    uploadScheduler = container.uploadScheduler,
+                ),
+            )
+            HomeRoute(viewModel = homeViewModel)
         }
     }
 }

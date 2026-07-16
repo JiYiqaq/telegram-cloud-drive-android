@@ -45,6 +45,7 @@ data class IndexUpdateJournal(
     val provisionalMessageId: Long? = null,
     val finalDocument: RemoteIndexDocument? = null,
     val includedOperationIds: Set<String> = emptySet(),
+    val candidateFileIds: Set<String> = emptySet(),
 ) {
     init {
         require(operationId.isNotBlank())
@@ -80,6 +81,7 @@ class IndexCandidate(
     val messageId: Long,
     val fileName: String,
     content: ByteArray,
+    val indexedFileIds: Set<String> = emptySet(),
 ) {
     private val value = content.copyOf()
 
@@ -160,7 +162,10 @@ interface IndexLocalStore {
 }
 
 sealed interface IndexUpdateOutcome {
-    data class Completed(val stableState: StableIndexState) : IndexUpdateOutcome
+    data class Completed(
+        val stableState: StableIndexState,
+        val publishedFileIds: Set<String> = emptySet(),
+    ) : IndexUpdateOutcome
 }
 
 enum class IndexUpdateFailure {
@@ -188,7 +193,7 @@ class IndexAtomicUpdater(
 ) {
     private val mutex = Mutex()
 
-    suspend fun resumeOrStart(): IndexUpdateOutcome = mutex.withLock {
+    suspend fun resumeOrStart(): IndexUpdateOutcome.Completed = mutex.withLock {
         var journal = localStore.readJournal() ?: createJournal()
 
         while (journal.phase != IndexUpdatePhase.COMMITTED) {
@@ -276,6 +281,7 @@ class IndexAtomicUpdater(
         return journal.copy(
             phase = IndexUpdatePhase.FINAL_EDITED,
             finalDocument = document,
+            candidateFileIds = candidate.indexedFileIds,
         ).also { localStore.persistJournal(it) }
     }
 
@@ -328,7 +334,7 @@ class IndexAtomicUpdater(
         }
         localStore.clearJournal(journal.operationId)
         runCatching { candidateFactory.clear(journal.operationId) }
-        return IndexUpdateOutcome.Completed(stable)
+        return IndexUpdateOutcome.Completed(stable, journal.candidateFileIds)
     }
 
     private fun matchesBase(remoteDocument: RemoteIndexDocument?, base: StableIndexState): Boolean =

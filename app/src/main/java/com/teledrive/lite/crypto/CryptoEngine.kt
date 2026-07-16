@@ -61,6 +61,11 @@ class CryptoEngine(
         }
     }
 
+    fun extractNonce(envelope: ByteArray): ByteArray {
+        parseHeader(envelope)
+        return envelope.copyOfRange(HEADER_BYTES, HEADER_BYTES + NONCE_BYTES)
+    }
+
     private fun parseHeader(envelope: ByteArray): ByteArray {
         if (envelope.size < ENVELOPE_OVERHEAD_BYTES) throw CryptoFormatException()
         val header = envelope.copyOfRange(0, HEADER_BYTES)

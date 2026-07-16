@@ -26,6 +26,7 @@ object IndexUpdateJournalCodec {
 
     private fun canonicalize(journal: IndexUpdateJournal): IndexUpdateJournal = journal.copy(
         includedOperationIds = journal.includedOperationIds.toSortedSet(),
+        candidateFileIds = journal.candidateFileIds.toSortedSet(),
     )
 
     private const val MAX_JOURNAL_CHARS = 1_000_000

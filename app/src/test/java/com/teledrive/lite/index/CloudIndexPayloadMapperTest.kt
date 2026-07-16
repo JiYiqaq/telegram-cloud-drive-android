@@ -47,6 +47,38 @@ class CloudIndexPayloadMapperTest {
         assertArrayEquals(snapshot.chunks.single().nonce, restored.chunks.single().nonce)
     }
 
+    @Test
+    fun completeUploadCandidateIsPublishedButOtherQueuedLocalFilesStayOutOfCloudIndex() {
+        val original = snapshot()
+        val uploading = original.files.single().copy(
+            uploadedAtEpochMillis = null,
+            status = FileStatus.UPLOADING,
+            isCloudIndexed = false,
+        )
+        val queued = uploading.copy(
+            id = "00000000-0000-0000-0000-000000000003",
+            name = "queued.txt",
+            sha256 = null,
+            wrappedDataKey = null,
+            status = FileStatus.PENDING,
+        )
+        val payload = CloudIndexPayloadMapper.toPayload(
+            snapshot = original.copy(files = listOf(uploading, queued)),
+            appVersion = "0.1.0",
+            revision = 1,
+            currentIndexMessageId = 71,
+            previous = null,
+            createdAtEpochMillis = 1_000,
+            updatedAtEpochMillis = 2_000,
+            keyDerivation = KeyDerivationParameters.pbkdf2(ByteArray(16), 1),
+        )
+
+        assertEquals(listOf(uploading.id), payload.files.map { it.id })
+        assertEquals(IndexFileStatus.AVAILABLE, payload.files.single().status)
+        assertEquals(true, payload.files.single().isCloudIndexed)
+        assertEquals(listOf(uploading.id), payload.chunks.map { it.fileId }.distinct())
+    }
+
     private fun snapshot(): CloudCacheSnapshot {
         val folder = FolderEntity("root", "TeleDrive", null, 1_000, 1_000)
         val file = FileEntity(

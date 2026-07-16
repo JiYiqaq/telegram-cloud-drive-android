@@ -36,7 +36,7 @@ abstract class TeleDriveDatabase : RoomDatabase() {
     abstract fun pendingOperationDao(): PendingOperationDao
 
     companion object {
-        const val DATABASE_VERSION: Int = 1
+        const val DATABASE_VERSION: Int = 2
         private const val DATABASE_NAME = "teledrive_cache.db"
 
         fun create(context: Context): TeleDriveDatabase =

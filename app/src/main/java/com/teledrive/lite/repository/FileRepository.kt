@@ -210,12 +210,14 @@ class FileRepository(
             if (fileDao.rename(fileId, name, now) != 1) {
                 fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
             }
-            recordPendingMutation(
-                PendingOperationType.RENAME,
-                fileId,
-                mutationPayload("oldName" to file.name, "newName" to name),
-                now,
-            )
+            if (file.isCloudIndexed) {
+                recordPendingMutation(
+                    PendingOperationType.RENAME,
+                    fileId,
+                    mutationPayload("oldName" to file.name, "newName" to name),
+                    now,
+                )
+            }
         }
     }
 
@@ -270,15 +272,17 @@ class FileRepository(
                         if (fileDao.moveAll(listOf(file.id), targetFolderId, now) != 1) {
                             fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
                         }
-                        recordPendingMutation(
-                            PendingOperationType.MOVE,
-                            file.id,
-                            mutationPayload(
-                                "fromParentId" to file.parentFolderId,
-                                "targetFolderId" to targetFolderId,
-                            ),
-                            now,
-                        )
+                        if (file.isCloudIndexed) {
+                            recordPendingMutation(
+                                PendingOperationType.MOVE,
+                                file.id,
+                                mutationPayload(
+                                    "fromParentId" to file.parentFolderId,
+                                    "targetFolderId" to targetFolderId,
+                                ),
+                                now,
+                            )
+                        }
                     }
                 }
                 BatchItemResult(fileId, succeeded = true)

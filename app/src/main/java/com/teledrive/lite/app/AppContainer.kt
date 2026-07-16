@@ -4,6 +4,7 @@ import android.content.Context
 import com.teledrive.lite.BuildConfig
 import com.teledrive.lite.crypto.CloudIndexEnvelopeCryptor
 import com.teledrive.lite.crypto.CryptoEngine
+import com.teledrive.lite.crypto.KeyWrapping
 import com.teledrive.lite.database.TeleDriveDatabase
 import com.teledrive.lite.index.EncryptedIndexCodec
 import com.teledrive.lite.repository.ConnectionRepository
@@ -29,6 +30,15 @@ import com.teledrive.lite.sync.RoomIndexSnapshotSource
 import com.teledrive.lite.sync.TelegramIndexRemote
 import java.io.File
 import java.util.UUID
+import com.teledrive.lite.upload.RoomUploadStore
+import com.teledrive.lite.upload.TelegramUploadRemote
+import com.teledrive.lite.upload.UploadCoordinator
+import com.teledrive.lite.upload.UploadQueueRepository
+import com.teledrive.lite.upload.UploadScheduler
+import com.teledrive.lite.upload.UploadServices
+import com.teledrive.lite.upload.ContentResolverUploadInput
+import com.teledrive.lite.upload.CloudIndexUpdateRunner
+import com.teledrive.lite.upload.RequiredFileIndexPublisher
 
 /**
  * 进程级依赖容器。后续任务会在这里注册数据库、网络客户端和仓库。
@@ -39,6 +49,13 @@ class AppContainer(context: Context) {
     val database: TeleDriveDatabase = TeleDriveDatabase.create(applicationContext)
     val fileRepository = FileRepository(database)
     val transferRepository = TransferRepository(database)
+    val uploadQueueRepository = UploadQueueRepository(database)
+    val uploadStore = RoomUploadStore(database)
+    val uploadScheduler = UploadScheduler(
+        context = applicationContext,
+        queueRepository = uploadQueueRepository,
+        uploadStore = uploadStore,
+    )
 
     private val secureValues = SharedPreferencesStringValueStore(
         applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
@@ -107,11 +124,40 @@ class AppContainer(context: Context) {
         )
     }
 
+    fun createUploadServices(): UploadServices? {
+        val config = secureConfigStore.load() ?: return null
+        setupStateStore.loadCryptoContext()?.close() ?: return null
+        val cloudIndex = createCloudIndexServices() ?: return null
+        val cryptoEngine = CryptoEngine()
+        val store = uploadStore
+        return UploadServices(
+            store = store,
+            coordinator = UploadCoordinator(
+                store = store,
+                input = ContentResolverUploadInput(applicationContext.contentResolver),
+                remote = TelegramUploadRemote(
+                    gateway = TelegramBotApiClient(config.botToken),
+                    chatId = config.channelId,
+                ),
+                indexPublisher = RequiredFileIndexPublisher(
+                    runner = CloudIndexUpdateRunner {
+                        cloudIndex.updater.resumeOrStart()
+                    },
+                    maximumAttempts = MAX_INDEX_PUBLICATION_ATTEMPTS,
+                ),
+                cryptoEngine = cryptoEngine,
+                keyWrapping = KeyWrapping(cryptoEngine),
+                cryptoContextProvider = setupStateStore::loadCryptoContext,
+            ),
+        )
+    }
+
     private companion object {
         const val PREFERENCES_NAME = "teledrive_secure_state_v1"
         const val CONFIG_KEY_ALIAS = "teledrive_config_key_v1"
         const val SESSION_KEY_ALIAS = "teledrive_session_key_v1"
         const val INDEX_CANDIDATE_DIRECTORY = "index-candidates-v1"
+        const val MAX_INDEX_PUBLICATION_ATTEMPTS = 3
     }
 }
 

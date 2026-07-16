@@ -181,6 +181,7 @@ class EncryptedIndexCandidateFactory(
                         messageId = request.messageId,
                         fileName = IndexAtomicUpdater.INDEX_FILE_NAME,
                         content = cached,
+                        indexedFileIds = payload.files.map { it.id }.toSet(),
                     )
                 } catch (error: Exception) {
                     throw IndexCandidateException(IndexCandidateFailure.ARTIFACT_MISMATCH, error)
@@ -219,7 +220,8 @@ class EncryptedIndexCandidateFactory(
             } finally {
                 SecureErase.wipe(prepared)
             }
-            val encrypted = encrypt(template.copy(currentIndexMessageId = request.messageId), context)
+            val finalPayload = template.copy(currentIndexMessageId = request.messageId)
+            val encrypted = encrypt(finalPayload, context)
             return try {
                 artifactStore.save(request.operationId, encrypted)
                 artifactStore.delete(preparedKey)
@@ -229,6 +231,7 @@ class EncryptedIndexCandidateFactory(
                     messageId = request.messageId,
                     fileName = IndexAtomicUpdater.INDEX_FILE_NAME,
                     content = encrypted,
+                    indexedFileIds = finalPayload.files.map { it.id }.toSet(),
                 )
             } finally {
                 SecureErase.wipe(encrypted)

@@ -111,6 +111,7 @@ data class ChunkEntity(
     @ColumnInfo(typeAffinity = ColumnInfo.BLOB) val nonce: ByteArray?,
     @ColumnInfo(name = "encrypted_size_bytes") val encryptedSizeBytes: Long,
     @ColumnInfo(name = "upload_status") val uploadStatus: ChunkUploadStatus,
+    @ColumnInfo(name = "plaintext_sha256") val plaintextSha256: String? = null,
 ) {
     init {
         require(partIndex >= 0)
@@ -151,6 +152,7 @@ data class TransferTaskEntity(
     @ColumnInfo(name = "work_request_id") val workRequestId: String?,
     @ColumnInfo(name = "created_at") val createdAtEpochMillis: Long,
     @ColumnInfo(name = "updated_at") val updatedAtEpochMillis: Long,
+    @ColumnInfo(name = "source_uri") val sourceUri: String? = null,
 ) {
     init {
         require(completedBytes >= 0 && totalBytes >= 0 && completedBytes <= totalBytes)

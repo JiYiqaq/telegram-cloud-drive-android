@@ -104,6 +104,27 @@ interface FileDao {
     @Query("UPDATE files SET status = :status, modified_at = :modifiedAt WHERE id = :id")
     suspend fun updateStatus(id: String, status: FileStatus, modifiedAt: Long): Int
 
+    @Query(
+        "UPDATE files SET sha256 = :sha256, wrapped_data_key = :wrappedDataKey, " +
+            "status = :status WHERE id = :id AND is_cloud_indexed = 0",
+    )
+    suspend fun persistUploadSecurity(
+        id: String,
+        sha256: String,
+        wrappedDataKey: ByteArray,
+        status: FileStatus,
+    ): Int
+
+    @Query(
+        "UPDATE files SET status = :status, is_cloud_indexed = 1, uploaded_at = :uploadedAt " +
+            "WHERE id = :id AND is_cloud_indexed = 0",
+    )
+    suspend fun finalizeUpload(
+        id: String,
+        status: FileStatus,
+        uploadedAt: Long,
+    ): Int
+
     @Query("DELETE FROM files WHERE id = :id")
     suspend fun deleteById(id: String): Int
 
@@ -219,6 +240,24 @@ interface TransferTaskDao {
             "updated_at = :updatedAt WHERE id = :id",
     )
     suspend fun retry(id: String, updatedAt: Long): Int
+
+    @Query(
+        "UPDATE transfer_tasks SET status = 'QUEUED', attempt = attempt + 1, " +
+            "work_request_id = :workRequestId, next_retry_at = NULL, error_code = NULL, " +
+            "speed_bytes_per_second = 0, updated_at = :updatedAt WHERE id = :id",
+    )
+    suspend fun retryWithWorkRequest(
+        id: String,
+        workRequestId: String,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        "UPDATE transfer_tasks SET status = 'WAITING_FOR_NETWORK', error_code = NULL, " +
+            "speed_bytes_per_second = 0, updated_at = :updatedAt " +
+            "WHERE type = 'UPLOAD' AND status = 'QUEUED'",
+    )
+    suspend fun markQueuedUploadsWaitingForNetwork(updatedAt: Long): Int
 
     @Query(
         "UPDATE transfer_tasks SET status = 'CANCELED', error_code = :reason, " +
