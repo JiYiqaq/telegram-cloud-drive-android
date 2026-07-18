@@ -10,6 +10,7 @@ import com.teledrive.lite.model.EntryKind
 import com.teledrive.lite.model.MoveTarget
 import com.teledrive.lite.download.DownloadScheduler
 import com.teledrive.lite.deletion.DeletionScheduler
+import com.teledrive.lite.deletion.DeletionStartRecovery
 import com.teledrive.lite.deletion.OrphanCleanupScheduler
 import com.teledrive.lite.deletion.FolderDeletionScheduler
 import com.teledrive.lite.model.SortDirection
@@ -186,7 +187,12 @@ class HomeViewModel(
             distinctEntries.forEach { entry ->
                 runCatching {
                     if (entry.kind == EntryKind.FILE) {
-                        deletionScheduler.enqueue(entry.id)
+                        DeletionStartRecovery.run(
+                            enqueue = { deletionScheduler.enqueue(entry.id) },
+                            synchronizeIndex = {
+                                requireNotNull(indexUpdater()).resumeOrStart()
+                            },
+                        )
                     } else {
                         folderDeletionScheduler.enqueue(entry.id)
                     }
