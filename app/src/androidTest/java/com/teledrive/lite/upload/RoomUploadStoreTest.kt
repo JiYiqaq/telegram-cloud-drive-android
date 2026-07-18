@@ -65,7 +65,7 @@ class RoomUploadStoreTest {
         )
         val store = RoomUploadStore(database, clock = { 20 })
 
-        store.markRunning(queued.taskId)
+        assertTrue(store.markRunning(queued.taskId, queued.workRequestId))
         val expected = ExpectedUploadChunk(0, Sha256.digest(byteArrayOf(1, 2, 3)), 3)
         store.persistSecurityMetadata(
             queued.taskId,
@@ -132,7 +132,7 @@ class RoomUploadStoreTest {
             originalWorkId,
         )
         val store = RoomUploadStore(database, clock = { 20 })
-        store.markRunning(queued.taskId)
+        assertTrue(store.markRunning(queued.taskId, queued.workRequestId))
         val expected = ExpectedUploadChunk(0, Sha256.digest(byteArrayOf(1, 2, 3)), 3)
         store.persistSecurityMetadata(
             queued.taskId,
@@ -192,7 +192,7 @@ class RoomUploadStoreTest {
             UUID.randomUUID().toString(),
         )
         val store = RoomUploadStore(database, clock = { 20 })
-        store.markRunning(queued.taskId)
+        assertTrue(store.markRunning(queued.taskId, queued.workRequestId))
         store.markStopped(
             queued.taskId,
             TransferStatus.FAILED,
@@ -237,7 +237,7 @@ class RoomUploadStoreTest {
             UUID.randomUUID().toString(),
         )
         val store = RoomUploadStore(database, clock = { 20 })
-        store.markRunning(queued.taskId)
+        assertTrue(store.markRunning(queued.taskId, queued.workRequestId))
         store.persistSecurityMetadata(
             queued.taskId,
             "ef".repeat(32),
@@ -282,7 +282,7 @@ class RoomUploadStoreTest {
             UUID.randomUUID().toString(),
         )
         val store = RoomUploadStore(database, clock = { 20 })
-        store.markRunning(queued.taskId)
+        assertTrue(store.markRunning(queued.taskId, queued.workRequestId))
         store.persistSecurityMetadata(
             queued.taskId,
             "12".repeat(32),

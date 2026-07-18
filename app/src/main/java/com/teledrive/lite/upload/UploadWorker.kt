@@ -28,6 +28,17 @@ data class UploadServices(
     val coordinator: UploadCoordinator,
 )
 
+object UploadWorkerFailurePolicy {
+    const val INVALID_TASK_ERROR = "INVALID_UPLOAD_TASK"
+
+    fun loadErrorCode(error: Exception): String =
+        if (error is UploadException) {
+            "UPLOAD_${error.failure.name}"
+        } else {
+            INVALID_TASK_ERROR
+        }
+}
+
 class UploadWorker(
     appContext: Context,
     workerParameters: WorkerParameters,
@@ -35,34 +46,67 @@ class UploadWorker(
     override suspend fun doWork(): Result {
         val taskId = inputData.getString(KEY_TASK_ID)
             ?: return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_INVALID_TASK))
+        val workRequestId = id.toString()
         val container = (applicationContext as TeleDriveApplication).container
         val services = container.createUploadServices()
         if (services == null) {
             runCatching {
-                container.uploadStore.markStopped(
+                container.uploadStore.markStoppedForWork(
                     taskId,
+                    workRequestId,
                     TransferStatus.FAILED,
                     ERROR_SETUP_REQUIRED,
                 )
             }
             return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_SETUP_REQUIRED))
         }
-        val retryDelayMillis = try {
-            services.store.retryDelayMillis(taskId)
-        } catch (_: Exception) {
-            return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_INVALID_TASK))
-        }
-        if (retryDelayMillis > 0) delay(retryDelayMillis)
         val initial = try {
-            services.store.load(taskId)
-        } catch (_: Exception) {
-            return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_INVALID_TASK))
+            services.store.loadForWorker(taskId, workRequestId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            return markFailed(
+                services.store,
+                taskId,
+                workRequestId,
+                UploadWorkerFailurePolicy.loadErrorCode(error),
+            )
         }
+        if (initial == null) return Result.success()
         createNotificationChannel()
+        // Waiting uploads are foreground work too, so a large predecessor cannot exhaust their
+        // ordinary ten-minute WorkManager execution window before they acquire the serial gate.
         setForeground(notification(initial.file, null))
 
+        val retryDelayMillis = try {
+            services.store.retryDelayMillis(taskId)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            return markFailed(
+                services.store,
+                taskId,
+                workRequestId,
+                UploadWorkerFailurePolicy.loadErrorCode(error),
+            )
+        }
+        if (retryDelayMillis > 0) delay(retryDelayMillis)
+
+        return UploadExecutionGate.processWide.withPermit {
+            executeUpload(taskId, workRequestId, services, initial)
+        }
+    }
+
+    private suspend fun executeUpload(
+        taskId: String,
+        workRequestId: String,
+        services: UploadServices,
+        initial: UploadResumeState,
+    ): Result {
         return try {
-            services.store.markRunning(taskId)
+            if (!services.store.markRunning(taskId, workRequestId)) {
+                return Result.success()
+            }
             val context = currentCoroutineContext()
             services.coordinator.execute(
                 taskId = taskId,
@@ -76,8 +120,9 @@ class UploadWorker(
         } catch (error: CancellationException) {
             withContext(NonCancellable) {
                 runCatching {
-                    services.store.markStopped(
+                    services.store.markStoppedForWork(
                         taskId,
+                        workRequestId,
                         TransferStatus.WAITING_FOR_NETWORK,
                         null,
                     )
@@ -85,23 +130,37 @@ class UploadWorker(
             }
             throw error
         } catch (error: TelegramApiException) {
-            handleTelegramFailure(services.store, taskId, error.failure)
+            handleTelegramFailure(services.store, taskId, workRequestId, error.failure)
         } catch (error: UploadException) {
-            markFailed(services.store, taskId, "UPLOAD_${error.failure.name}")
+            markFailed(
+                services.store,
+                taskId,
+                workRequestId,
+                "UPLOAD_${error.failure.name}",
+            )
         } catch (_: Exception) {
-            markFailed(services.store, taskId, ERROR_UPLOAD_FAILED)
+            markFailed(services.store, taskId, workRequestId, ERROR_UPLOAD_FAILED)
         }
     }
 
     private suspend fun handleTelegramFailure(
         store: RoomUploadStore,
         taskId: String,
+        workRequestId: String,
         failure: TelegramFailure,
     ): Result {
         val retryAfter = (failure as? TelegramFailure.Api)?.retryAfterSeconds
         if (retryAfter != null && retryAfter > 0) {
             val retryAt = System.currentTimeMillis() + retryAfter * 1_000
-            runCatching { store.markRetry(taskId, retryAt, ERROR_RATE_LIMITED) }
+            val retryRecorded = runCatching {
+                store.markRetryForWork(
+                    taskId,
+                    workRequestId,
+                    retryAt,
+                    ERROR_RATE_LIMITED,
+                )
+            }.getOrDefault(false)
+            if (!retryRecorded) return Result.success()
             setProgress(
                 workDataOf(
                     KEY_ERROR_CODE to ERROR_RATE_LIMITED,
@@ -116,12 +175,30 @@ class UploadWorker(
         } else {
             ERROR_TELEGRAM_REJECTED
         }
-        return markFailed(store, taskId, code)
+        return markFailed(store, taskId, workRequestId, code)
     }
 
-    private suspend fun markFailed(store: RoomUploadStore, taskId: String, code: String): Result {
-        runCatching { store.markStopped(taskId, TransferStatus.FAILED, code) }
-        return Result.failure(workDataOf(KEY_ERROR_CODE to code))
+    private suspend fun markFailed(
+        store: RoomUploadStore,
+        taskId: String,
+        workRequestId: String,
+        code: String,
+    ): Result {
+        val recorded = try {
+            store.markStoppedForWork(
+                taskId,
+                workRequestId,
+                TransferStatus.FAILED,
+                code,
+            )
+        } catch (_: Exception) {
+            return Result.failure(workDataOf(KEY_ERROR_CODE to code))
+        }
+        return if (recorded) {
+            Result.failure(workDataOf(KEY_ERROR_CODE to code))
+        } else {
+            Result.success()
+        }
     }
 
     private fun notification(
@@ -214,7 +291,7 @@ class UploadWorker(
 
         private const val NOTIFICATION_CHANNEL_ID = "teledrive_uploads"
         private const val NOTIFICATION_ID_BASE = 4_000
-        private const val ERROR_INVALID_TASK = "INVALID_UPLOAD_TASK"
+        private const val ERROR_INVALID_TASK = UploadWorkerFailurePolicy.INVALID_TASK_ERROR
         private const val ERROR_SETUP_REQUIRED = "SETUP_REQUIRED"
         private const val ERROR_UPLOAD_FAILED = "UPLOAD_FAILED"
         private const val ERROR_RATE_LIMITED = "TELEGRAM_RATE_LIMITED"

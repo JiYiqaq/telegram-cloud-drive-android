@@ -123,7 +123,22 @@ class RoomUploadStore(
     private val commitMutex = Mutex()
 
     override suspend fun load(taskId: String): UploadResumeState = database.withTransaction {
+        loadState(requireUploadTask(taskId))
+    }
+
+    suspend fun loadForWorker(
+        taskId: String,
+        workRequestId: String,
+    ): UploadResumeState? = database.withTransaction {
+        require(runCatching { UUID.fromString(workRequestId) }.isSuccess)
         val task = requireUploadTask(taskId)
+        if (task.workRequestId != workRequestId || task.status !in STARTABLE_TASK_STATES) {
+            return@withTransaction null
+        }
+        loadState(task)
+    }
+
+    private suspend fun loadState(task: TransferTaskEntity): UploadResumeState {
         val file = requireNotNull(task.fileId?.let { database.fileDao().getById(it) })
         require(file.status in UPLOAD_FILE_STATES && !file.isCloudIndexed)
         val sourceUri = requireNotNull(task.sourceUri)
@@ -142,7 +157,7 @@ class RoomUploadStore(
                 require(chunk.encryptedSizeBytes == plaintextSize(file, chunk.partIndex) + CryptoEngine.ENVELOPE_OVERHEAD_BYTES)
             }
         }
-        UploadResumeState(
+        return UploadResumeState(
             file = UploadFileSnapshot(
                 taskId = task.id,
                 fileId = file.id,
@@ -346,18 +361,49 @@ class RoomUploadStore(
         )
     }
 
-    suspend fun markRunning(taskId: String) = database.withTransaction {
-        val task = requireUploadTask(taskId)
-        require(task.status in STARTABLE_TASK_STATES)
-        require(
-            database.transferTaskDao().updateStatus(
-                task.id,
-                TransferStatus.RUNNING,
-                null,
-                0,
-                clock(),
-            ) == 1,
-        )
+    suspend fun markRunning(taskId: String, workRequestId: String): Boolean =
+        database.withTransaction {
+            require(runCatching { UUID.fromString(workRequestId) }.isSuccess)
+            database.transferTaskDao().startPendingUploadWork(
+                id = taskId,
+                workRequestId = workRequestId,
+                updatedAt = clock(),
+            ) == 1
+        }
+
+    suspend fun markStoppedForWork(
+        taskId: String,
+        workRequestId: String,
+        status: TransferStatus,
+        errorCode: String?,
+    ): Boolean = database.withTransaction {
+        require(runCatching { UUID.fromString(workRequestId) }.isSuccess)
+        require(status in STOPPED_TASK_STATES)
+        require(status != TransferStatus.FAILED || !errorCode.isNullOrBlank())
+        database.transferTaskDao().stopPendingUploadWork(
+            id = taskId,
+            workRequestId = workRequestId,
+            status = status,
+            errorCode = errorCode,
+            updatedAt = clock(),
+        ) == 1
+    }
+
+    suspend fun markRetryForWork(
+        taskId: String,
+        workRequestId: String,
+        retryAtEpochMillis: Long,
+        errorCode: String,
+    ): Boolean = database.withTransaction {
+        require(runCatching { UUID.fromString(workRequestId) }.isSuccess)
+        require(retryAtEpochMillis > clock() && errorCode.isNotBlank())
+        database.transferTaskDao().scheduleUploadRetryForWork(
+            id = taskId,
+            workRequestId = workRequestId,
+            retryAt = retryAtEpochMillis,
+            errorCode = errorCode,
+            updatedAt = clock(),
+        ) == 1
     }
 
     suspend fun markStopped(taskId: String, status: TransferStatus, errorCode: String?) =
@@ -374,21 +420,6 @@ class RoomUploadStore(
                     status,
                     errorCode,
                     0,
-                    clock(),
-                ) == 1,
-            )
-        }
-
-    suspend fun markRetry(taskId: String, retryAtEpochMillis: Long, errorCode: String) =
-        database.withTransaction {
-            val task = requireUploadTask(taskId)
-            require(task.status == TransferStatus.RUNNING)
-            require(retryAtEpochMillis > clock() && errorCode.isNotBlank())
-            require(
-                database.transferTaskDao().scheduleRetry(
-                    task.id,
-                    retryAtEpochMillis,
-                    errorCode,
                     clock(),
                 ) == 1,
             )
@@ -457,6 +488,20 @@ class RoomUploadStore(
             QueuedUpload(task.id, fileId, workRequestId)
         }
 
+    suspend fun recoverableTaskIds(): List<String> = database.withTransaction {
+        database.transferTaskDao().getRecoverableUploadTaskIds()
+    }
+
+    suspend fun replacePendingWorkRequest(taskId: String, workRequestId: String): Boolean =
+        database.withTransaction {
+            require(runCatching { UUID.fromString(workRequestId) }.isSuccess)
+            database.transferTaskDao().replacePendingUploadWorkRequest(
+                id = taskId,
+                workRequestId = workRequestId,
+                updatedAt = clock(),
+            ) == 1
+        }
+
     private suspend fun requireUploadTask(taskId: String): TransferTaskEntity =
         requireNotNull(database.transferTaskDao().getById(taskId)).also {
             require(it.type == TransferType.UPLOAD)
@@ -504,7 +549,6 @@ class RoomUploadStore(
             TransferStatus.PAUSED,
             TransferStatus.WAITING_FOR_NETWORK,
             TransferStatus.WAITING_FOR_RETRY,
-            TransferStatus.FAILED,
             TransferStatus.RUNNING,
         )
         val STOPPED_TASK_STATES = setOf(

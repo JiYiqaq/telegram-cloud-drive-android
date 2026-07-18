@@ -197,6 +197,13 @@ interface TransferTaskDao {
     @Query("SELECT * FROM transfer_tasks WHERE id = :id")
     suspend fun getById(id: String): TransferTaskEntity?
 
+    @Query(
+        "SELECT id FROM transfer_tasks WHERE type = 'UPLOAD' " +
+            "AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELED') " +
+            "AND source_uri IS NOT NULL ORDER BY created_at",
+    )
+    suspend fun getRecoverableUploadTaskIds(): List<String>
+
     @Upsert
     suspend fun upsert(task: TransferTaskEntity)
 
@@ -226,6 +233,47 @@ interface TransferTaskDao {
     ): Int
 
     @Query(
+        "UPDATE transfer_tasks SET status = 'RUNNING', error_code = NULL, " +
+            "speed_bytes_per_second = 0, updated_at = :updatedAt " +
+            "WHERE id = :id AND type = 'UPLOAD' AND work_request_id = :workRequestId " +
+            "AND status IN ('QUEUED', 'PAUSED', 'WAITING_FOR_NETWORK', " +
+            "'WAITING_FOR_RETRY', 'RUNNING')",
+    )
+    suspend fun startPendingUploadWork(
+        id: String,
+        workRequestId: String,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        "UPDATE transfer_tasks SET status = :status, error_code = :errorCode, " +
+            "next_retry_at = NULL, speed_bytes_per_second = 0, updated_at = :updatedAt " +
+            "WHERE id = :id AND type = 'UPLOAD' AND work_request_id = :workRequestId " +
+            "AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELED')",
+    )
+    suspend fun stopPendingUploadWork(
+        id: String,
+        workRequestId: String,
+        status: TransferStatus,
+        errorCode: String?,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        "UPDATE transfer_tasks SET status = 'WAITING_FOR_RETRY', next_retry_at = :retryAt, " +
+            "error_code = :errorCode, speed_bytes_per_second = 0, updated_at = :updatedAt " +
+            "WHERE id = :id AND type = 'UPLOAD' AND work_request_id = :workRequestId " +
+            "AND status = 'RUNNING'",
+    )
+    suspend fun scheduleUploadRetryForWork(
+        id: String,
+        workRequestId: String,
+        retryAt: Long,
+        errorCode: String,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
         "UPDATE transfer_tasks SET status = 'WAITING_FOR_RETRY', next_retry_at = :retryAt, " +
             "error_code = :errorCode, speed_bytes_per_second = 0, updated_at = :updatedAt " +
             "WHERE id = :id",
@@ -250,6 +298,17 @@ interface TransferTaskDao {
             "speed_bytes_per_second = 0, updated_at = :updatedAt WHERE id = :id",
     )
     suspend fun retryWithWorkRequest(
+        id: String,
+        workRequestId: String,
+        updatedAt: Long,
+    ): Int
+
+    @Query(
+        "UPDATE transfer_tasks SET work_request_id = :workRequestId, updated_at = :updatedAt " +
+            "WHERE id = :id AND type = 'UPLOAD' " +
+            "AND status NOT IN ('SUCCESS', 'FAILED', 'CANCELED')",
+    )
+    suspend fun replacePendingUploadWorkRequest(
         id: String,
         workRequestId: String,
         updatedAt: Long,

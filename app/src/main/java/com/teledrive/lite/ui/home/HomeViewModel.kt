@@ -75,9 +75,15 @@ class HomeViewModel(
 
     init {
         viewModelScope.launch {
+            val recoveredUploads = runCatching {
+                uploadScheduler.recoverLegacyQueue()
+            }.getOrDefault(0)
             uploadScheduler.refreshNetworkState()
             downloadScheduler.refreshNetworkState()
             fileRepository.initializeRoot()
+            if (recoveredUploads > 0) {
+                message.value = "已自动恢复 $recoveredUploads 个等待中的上传"
+            }
         }
     }
 

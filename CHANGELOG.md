@@ -2,6 +2,18 @@
 
 All notable changes follow semantic versioning. This project is pre-release software.
 
+## [0.1.4-alpha] - 2026-07-18
+
+### Changed
+
+- Isolated each upload in its own durable WorkManager request while retaining one-at-a-time execution
+- Added a one-time upgrade migration that automatically requeues uploads stuck by the legacy serial chain
+
+### Fixed
+
+- Prevent a failed or canceled upload prerequisite from leaving later selected files at “等待开始”
+- Preserve serial upload execution without propagating one file's WorkManager outcome to the next file
+
 ## [0.1.3-alpha] - 2026-07-18
 
 ### Added
