@@ -6,8 +6,8 @@ import org.junit.Test
 
 class TransferHistoryPolicyTest {
     @Test
-    fun onlyTerminalTransferRecordsCanBeDismissed() {
-        val dismissible = TransferStatus.entries.filter(TransferHistoryPolicy::canDismiss)
+    fun terminalStatusesAreRecognizedForHistoryGrouping() {
+        val dismissible = TransferStatus.entries.filter(TransferHistoryPolicy::isTerminal)
 
         assertEquals(
             listOf(

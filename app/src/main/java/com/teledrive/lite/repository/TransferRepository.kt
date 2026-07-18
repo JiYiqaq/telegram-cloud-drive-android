@@ -39,7 +39,7 @@ class TransferRepository(
         database.withTransaction {
             val task = taskDao.getById(taskId)
                 ?: fail(TransferRepositoryFailure.TASK_NOT_FOUND)
-            if (!TransferHistoryPolicy.canDismiss(task.status)) {
+            if (!TransferHistoryPolicy.canDismiss(task)) {
                 fail(TransferRepositoryFailure.INVALID_STATE)
             }
             if (taskDao.deleteTerminalById(taskId) != 1) {

@@ -11,10 +11,10 @@ enum class HomeSection {
 
 object DriveDashboardPresentation {
     fun activeTransfers(tasks: List<TransferTaskEntity>): List<TransferTaskEntity> =
-        tasks.filterNot { TransferHistoryPolicy.canDismiss(it.status) }
+        tasks.filterNot { TransferHistoryPolicy.isTerminal(it.status) }
 
     fun historyTransfers(tasks: List<TransferTaskEntity>): List<TransferTaskEntity> =
-        tasks.filter { TransferHistoryPolicy.canDismiss(it.status) }
+        tasks.filter { TransferHistoryPolicy.isTerminal(it.status) }
 
     fun historyCount(tasks: List<TransferTaskEntity>): Int = historyTransfers(tasks).size
 

@@ -292,11 +292,18 @@ interface TransferTaskDao {
 
     @Query(
         "DELETE FROM transfer_tasks WHERE id = :id " +
-            "AND status IN ('SUCCESS', 'FAILED', 'CANCELED')",
+            "AND (" +
+            "status = 'SUCCESS' OR " +
+            "(status IN ('FAILED', 'CANCELED') AND (type = 'DOWNLOAD' OR file_id IS NULL))" +
+            ")",
     )
     suspend fun deleteTerminalById(id: String): Int
 
-    @Query("DELETE FROM transfer_tasks WHERE status IN ('SUCCESS', 'FAILED', 'CANCELED')")
+    @Query(
+        "DELETE FROM transfer_tasks WHERE " +
+            "status = 'SUCCESS' OR " +
+            "(status IN ('FAILED', 'CANCELED') AND (type = 'DOWNLOAD' OR file_id IS NULL))",
+    )
     suspend fun deleteTerminalHistory(): Int
 }
 

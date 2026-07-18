@@ -13,30 +13,36 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 
 private val LightColorScheme = lightColorScheme(
-    primary = Teal600,
+    primary = CloudBlue600,
     onPrimary = Color.White,
-    primaryContainer = Teal100,
+    primaryContainer = CloudBlue100,
     onPrimaryContainer = Navy900,
-    secondary = Slate700,
+    secondary = Teal600,
     onSecondary = Color.White,
+    secondaryContainer = Teal100,
     background = Mist50,
     onBackground = Navy950,
     surface = Color.White,
     onSurface = Navy950,
+    surfaceVariant = Color(0xFFEDF3FA),
+    outlineVariant = Color(0xFFD8E2ED),
     error = ErrorLight,
 )
 
 private val DarkColorScheme = darkColorScheme(
-    primary = Teal300,
+    primary = CloudBlue300,
     onPrimary = Navy950,
-    primaryContainer = Teal800,
-    onPrimaryContainer = Teal100,
-    secondary = Slate200,
+    primaryContainer = CloudBlue700,
+    onPrimaryContainer = CloudBlue100,
+    secondary = Teal300,
     onSecondary = Navy900,
+    secondaryContainer = Teal800,
     background = Navy950,
     onBackground = Mist100,
     surface = Navy900,
     onSurface = Mist100,
+    surfaceVariant = Navy800,
+    outlineVariant = Slate700,
     error = ErrorDark,
 )
 

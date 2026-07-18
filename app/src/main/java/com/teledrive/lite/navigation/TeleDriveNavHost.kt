@@ -13,7 +13,7 @@ import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.teledrive.lite.app.AppContainer
-import com.teledrive.lite.ui.home.HomeRoute
+import com.teledrive.lite.ui.home.DriveDashboardRoute
 import com.teledrive.lite.ui.home.HomeViewModel
 import com.teledrive.lite.ui.home.HomeViewModelFactory
 import com.teledrive.lite.ui.setup.SetupRoute
@@ -90,7 +90,7 @@ fun TeleDriveNavHost(
                     folderDeletionScheduler = container.folderDeletionScheduler,
                 ),
             )
-            HomeRoute(
+            DriveDashboardRoute(
                 viewModel = homeViewModel,
                 onOpenSettings = { navController.navigate(Routes.Settings) },
                 onOpenFileDetail = { navController.navigate(Routes.fileDetail(it)) },
