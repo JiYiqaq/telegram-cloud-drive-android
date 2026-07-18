@@ -591,14 +591,14 @@ private fun DriveHeroHeader(
     currentFolder: String,
     onOpenSettings: () -> Unit,
 ) {
-    val colors = MaterialTheme.colorScheme
+    val hero = DriveDashboardPresentation.heroPalette(MaterialTheme.colorScheme)
     Column(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(28.dp))
             .background(
                 Brush.linearGradient(
-                    listOf(colors.primary, Color(0xFF19A799)),
+                    listOf(hero.start, hero.end),
                 ),
             )
             .padding(20.dp),
@@ -611,43 +611,43 @@ private fun DriveHeroHeader(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Surface(
-                    color = Color.White.copy(alpha = 0.18f),
+                    color = hero.content.copy(alpha = 0.18f),
                     shape = CircleShape,
                     modifier = Modifier.size(44.dp),
                 ) {
                     Box(contentAlignment = Alignment.Center) {
-                        Text("T", color = Color.White, fontWeight = FontWeight.Bold)
+                        Text("T", color = hero.content, fontWeight = FontWeight.Bold)
                     }
                 }
                 Spacer(Modifier.width(12.dp))
                 Column {
                     Text(
                         "TeleDrive 云盘",
-                        color = Color.White,
+                        color = hero.content,
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
                         "端到端加密 · Telegram 存储",
-                        color = Color.White.copy(alpha = 0.82f),
+                        color = hero.content.copy(alpha = 0.82f),
                         style = MaterialTheme.typography.bodySmall,
                     )
                 }
             }
             TextButton(onClick = onOpenSettings) {
-                Text("设置", color = Color.White)
+                Text("设置", color = hero.content)
             }
         }
         Column {
             Text(
                 currentFolder,
-                color = Color.White,
+                color = hero.content,
                 style = MaterialTheme.typography.titleMedium,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
             )
             Text(
                 "$fileCount 个项目 · 文件仅在本机解密",
-                color = Color.White.copy(alpha = 0.82f),
+                color = hero.content.copy(alpha = 0.82f),
                 style = MaterialTheme.typography.bodyMedium,
             )
         }

@@ -1,8 +1,16 @@
 package com.teledrive.lite.ui.home
 
+import androidx.compose.material3.ColorScheme
+import androidx.compose.ui.graphics.Color
 import com.teledrive.lite.database.TransferTaskEntity
 import com.teledrive.lite.model.FileStatus
 import com.teledrive.lite.repository.TransferHistoryPolicy
+
+data class DriveHeroPalette(
+    val start: Color,
+    val end: Color,
+    val content: Color,
+)
 
 enum class HomeSection {
     FILES,
@@ -10,6 +18,12 @@ enum class HomeSection {
 }
 
 object DriveDashboardPresentation {
+    fun heroPalette(colors: ColorScheme): DriveHeroPalette = DriveHeroPalette(
+        start = colors.primary,
+        end = colors.secondary,
+        content = colors.onPrimary,
+    )
+
     fun activeTransfers(tasks: List<TransferTaskEntity>): List<TransferTaskEntity> =
         tasks.filterNot { TransferHistoryPolicy.isTerminal(it.status) }
 

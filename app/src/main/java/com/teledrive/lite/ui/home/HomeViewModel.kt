@@ -184,7 +184,13 @@ class HomeViewModel(
     fun deleteFile(fileId: String) {
         viewModelScope.launch {
             message.value = try {
-                deletionScheduler.enqueue(fileId)
+                DeletionStartRecovery.runBatch(
+                    fileIds = listOf(fileId),
+                    enqueue = deletionScheduler::enqueueBatch,
+                    synchronizeIndex = {
+                        requireNotNull(indexUpdater()).resumeOrStart()
+                    },
+                )
                 HomePresentation.deletionMessage(queuedFiles = 1, queuedFolders = 0, failed = 0)
             } catch (_: Exception) {
                 "无法开始删除；若为部分删除文件，请稍后重试"
@@ -202,20 +208,25 @@ class HomeViewModel(
         viewModelScope.launch {
             var queuedFiles = 0
             var queuedFolders = 0
-            distinctEntries.forEach { entry ->
+            val files = distinctEntries.filter { it.kind == EntryKind.FILE }
+            if (files.isNotEmpty()) {
                 runCatching {
-                    if (entry.kind == EntryKind.FILE) {
-                        DeletionStartRecovery.run(
-                            enqueue = { deletionScheduler.enqueue(entry.id) },
-                            synchronizeIndex = {
-                                requireNotNull(indexUpdater()).resumeOrStart()
-                            },
-                        )
-                    } else {
-                        folderDeletionScheduler.enqueue(entry.id)
-                    }
+                    DeletionStartRecovery.runBatch(
+                        fileIds = files.map(DirectoryEntry::id),
+                        enqueue = deletionScheduler::enqueueBatch,
+                        synchronizeIndex = {
+                            requireNotNull(indexUpdater()).resumeOrStart()
+                        },
+                    )
                 }.onSuccess {
-                    if (entry.kind == EntryKind.FILE) queuedFiles += 1 else queuedFolders += 1
+                    queuedFiles = files.size
+                }
+            }
+            distinctEntries.filter { it.kind == EntryKind.FOLDER }.forEach { folder ->
+                runCatching {
+                    folderDeletionScheduler.enqueue(folder.id)
+                }.onSuccess {
+                    queuedFolders += 1
                 }
             }
             message.value = HomePresentation.deletionMessage(

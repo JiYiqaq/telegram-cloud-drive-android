@@ -247,6 +247,60 @@ class TeleDriveDatabaseTest {
     }
 
     @Test
+    fun repositoryStartsTwoFileDeletionsFromOneStableIndexTransaction() = runBlocking {
+        val now = 1_700_000_000_000L
+        val repository = FileRepository(database = database, clock = { now })
+        database.folderDao().upsert(FolderEntity("root", "我的云盘", null, now, now))
+        listOf("file-1", "file-2").forEachIndexed { index, fileId ->
+            database.fileDao().upsert(testFile(fileId, "root", FileStatus.DOWNLOADING, now))
+            database.chunkDao().upsert(
+                ChunkEntity(
+                    "chunk-$fileId",
+                    fileId,
+                    0,
+                    51L + index,
+                    "remote-$fileId",
+                    ByteArray(12),
+                    17,
+                    ChunkUploadStatus.UPLOADED,
+                ),
+            )
+        }
+        database.indexStateDao().upsert(
+            IndexStateEntity(
+                id = IndexStateEntity.SINGLETON_ID,
+                formatVersion = 1,
+                revision = 4,
+                rootFolderId = "root",
+                currentIndexMessageId = 90,
+                previousIndexMessageId = 89,
+                currentIndexFileId = "index-file",
+                lastSyncedAtEpochMillis = now,
+                syncStatus = IndexSyncStatus.SYNCED,
+            ),
+        )
+
+        val starts = repository.beginFileDeletions(listOf("file-1", "file-2"))
+
+        assertEquals(2, starts.size)
+        assertEquals(
+            setOf("file-1", "file-2"),
+            starts.map { it.fileId }.toSet(),
+        )
+        starts.forEach { start ->
+            assertEquals(
+                4L,
+                database.pendingOperationDao().getById(start.operationId)?.baseRevision,
+            )
+            assertEquals(FileStatus.DELETING, database.fileDao().getById(start.fileId)?.status)
+        }
+        assertEquals(
+            IndexSyncStatus.DIRTY,
+            database.indexStateDao().get(IndexStateEntity.SINGLETON_ID)?.syncStatus,
+        )
+    }
+
+    @Test
     fun repositoryRejectsUnsafeFinalDeletionAndInvalidCloudSnapshotsAtomically() = runBlocking {
         val now = 1_700_000_000_000L
         val repository = FileRepository(database = database, clock = { now })

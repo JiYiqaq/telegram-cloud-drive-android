@@ -20,6 +20,8 @@ All notable changes follow semantic versioning. This project is pre-release soft
 
 - Automatically synchronize a dirty pinned index and retry once when deletion is requested immediately after a successful upload
 - Keep failed upload records until remote orphan chunks are cleaned so cleanup metadata cannot be lost
+- Start multi-file deletion from one stable index transaction, isolate per-file failures, and requeue retryable items
+- Use theme-aware hero foreground colors so the dashboard stays legible in dark mode
 
 ## [0.1.2-alpha] - 2026-07-18
 

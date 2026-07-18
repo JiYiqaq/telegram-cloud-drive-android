@@ -10,6 +10,29 @@ import org.junit.Test
 
 class DeletionStartRecoveryTest {
     @Test
+    fun multipleFilesStayInOneBatchAcrossIndexRecovery() = runBlocking {
+        val requestedIds = listOf("file-1", "file-2")
+        val receivedBatches = mutableListOf<List<String>>()
+        var syncAttempts = 0
+
+        DeletionStartRecovery.runBatch(
+            fileIds = requestedIds,
+            enqueue = { batch ->
+                receivedBatches += batch
+                if (receivedBatches.size == 1) {
+                    throw DriveRepositoryException(
+                        DriveRepositoryFailure.INDEX_CONFIRMATION_REQUIRED,
+                    )
+                }
+            },
+            synchronizeIndex = { syncAttempts += 1 },
+        )
+
+        assertEquals(listOf(requestedIds, requestedIds), receivedBatches)
+        assertEquals(1, syncAttempts)
+    }
+
+    @Test
     fun dirtyIndexIsSynchronizedBeforeOneDeletionRetry() = runBlocking {
         var enqueueAttempts = 0
         var syncAttempts = 0

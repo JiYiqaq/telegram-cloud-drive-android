@@ -82,6 +82,7 @@ data class CloudCacheSnapshot(
 )
 
 data class FileDeletionStart(
+    val fileId: String,
     val operationId: String,
     val canceledWorkRequestIds: List<String>,
 )
@@ -434,6 +435,7 @@ class FileRepository(
                     )
                 }
                 return@withTransaction FileDeletionStart(
+                    fileId,
                     operationId,
                     activeTasks.mapNotNull { it.workRequestId },
                 )
@@ -481,7 +483,125 @@ class FileRepository(
                 fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
             }
             indexStateDao.upsert(indexState.copy(syncStatus = IndexSyncStatus.DIRTY))
-            FileDeletionStart(operationId, activeTasks.mapNotNull { it.workRequestId })
+            FileDeletionStart(fileId, operationId, activeTasks.mapNotNull { it.workRequestId })
+        }
+    }
+
+    suspend fun beginFileDeletions(fileIds: List<String>): List<FileDeletionStart> {
+        val distinctIds = fileIds.filter(String::isNotBlank).distinct()
+        if (distinctIds.isEmpty()) return emptyList()
+        if (distinctIds.size == 1) {
+            return listOf(beginFileDeletion(distinctIds.single()))
+        }
+        return mutationMutex.withLock {
+            database.withTransaction {
+                val files = distinctIds.map { fileId ->
+                    fileDao.getById(fileId) ?: fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+                }
+                val needsStableIndex = files.any { it.status !in FINAL_DELETION_STATES }
+                val indexState = indexStateDao.get(IndexStateEntity.SINGLETON_ID)
+                if (
+                    needsStableIndex &&
+                    (
+                        indexState == null ||
+                            indexState.syncStatus != IndexSyncStatus.SYNCED ||
+                            indexState.currentIndexMessageId == null ||
+                            indexState.currentIndexFileId.isNullOrBlank() ||
+                            indexState.lastSyncedAtEpochMillis == null
+                        )
+                ) {
+                    fail(DriveRepositoryFailure.INDEX_CONFIRMATION_REQUIRED)
+                }
+                val now = clock()
+                val starts = files.map { file ->
+                    val fileId = file.id
+                    val operationId = deletionOperationId(fileId)
+                    val existingOperation = pendingOperationDao.getById(operationId)
+                    val activeTasks = transferTaskDao.getActiveForFile(fileId)
+                    if (activeTasks.isNotEmpty()) {
+                        if (
+                            transferTaskDao.cancelActiveForFile(fileId, FILE_DELETION_REASON, now) !=
+                            activeTasks.size
+                        ) {
+                            fail(DriveRepositoryFailure.ACTIVE_TRANSFER_EXISTS)
+                        }
+                    }
+                    if (file.status in FINAL_DELETION_STATES) {
+                        val operation = existingOperation
+                            ?: fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
+                        if (
+                            operation.type != PendingOperationType.DELETE ||
+                            operation.targetId != fileId
+                        ) {
+                            fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
+                        }
+                        if (file.status == FileStatus.PARTIALLY_DELETED) {
+                            val transition = DeletionFailureRecovery.retryTransition(file.status)
+                            if (fileDao.updateStatus(fileId, transition.fileStatus, now) != 1) {
+                                fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+                            }
+                            pendingOperationDao.upsert(
+                                operation.copy(
+                                    status = transition.operationStatus,
+                                    nextRetryAtEpochMillis = null,
+                                    errorCode = transition.errorCode,
+                                    updatedAtEpochMillis = now,
+                                ),
+                            )
+                        }
+                        return@map FileDeletionStart(
+                            fileId,
+                            operationId,
+                            activeTasks.mapNotNull { it.workRequestId },
+                        )
+                    }
+                    if (!file.isCloudIndexed || !FileStateMachine.canBeginCloudDeletion(file.status)) {
+                        fail(DriveRepositoryFailure.INVALID_FILE_STATE)
+                    }
+                    val chunks = chunkDao.getForFile(fileId)
+                    if (
+                        !CloudSnapshotValidator.hasCompleteChunkSet(file, chunks) ||
+                        chunks.mapNotNull(ChunkEntity::messageId).toSet().size != chunks.size
+                    ) {
+                        fail(DriveRepositoryFailure.REMOTE_DELETE_INCOMPLETE)
+                    }
+                    val stableIndex = requireNotNull(indexState)
+                    pendingOperationDao.upsert(
+                        PendingOperationEntity(
+                            id = operationId,
+                            type = PendingOperationType.DELETE,
+                            targetId = fileId,
+                            payloadJson = null,
+                            remainingMessageIdsJson = messageIdsJson(
+                                chunks.mapNotNull { it.messageId }.toSet(),
+                            ),
+                            baseRevision = stableIndex.revision,
+                            candidateRevision = null,
+                            indexConfirmedAtEpochMillis = null,
+                            status = PendingOperationStatus.PENDING,
+                            attempt = 0,
+                            nextRetryAtEpochMillis = null,
+                            errorCode = null,
+                            createdAtEpochMillis = now,
+                            updatedAtEpochMillis = now,
+                        ),
+                    )
+                    if (fileDao.updateStatus(fileId, FileStatus.DELETING, now) != 1) {
+                        fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+                    }
+                    FileDeletionStart(
+                        fileId,
+                        operationId,
+                        activeTasks.mapNotNull { it.workRequestId },
+                    )
+                }
+                if (needsStableIndex) {
+                    indexStateDao.upsert(
+                        requireNotNull(indexState).copy(syncStatus = IndexSyncStatus.DIRTY),
+                    )
+                }
+                starts
+            }
         }
     }
 

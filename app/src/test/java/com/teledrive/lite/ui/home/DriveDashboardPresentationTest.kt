@@ -1,14 +1,43 @@
 package com.teledrive.lite.ui.home
 
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
+import androidx.compose.ui.graphics.Color
 import com.teledrive.lite.database.TransferTaskEntity
 import com.teledrive.lite.model.FileStatus
 import com.teledrive.lite.model.TransferStatus
 import com.teledrive.lite.model.TransferType
+import com.teledrive.lite.ui.theme.CloudBlue300
+import com.teledrive.lite.ui.theme.CloudBlue600
+import com.teledrive.lite.ui.theme.Navy950
+import com.teledrive.lite.ui.theme.Teal300
+import com.teledrive.lite.ui.theme.Teal600
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Test
 
 class DriveDashboardPresentationTest {
+    @Test
+    fun heroPaletteUsesThemeForegroundForBothLightAndDarkSchemes() {
+        val light = DriveDashboardPresentation.heroPalette(
+            lightColorScheme(
+                primary = CloudBlue600,
+                onPrimary = Color.White,
+                secondary = Teal600,
+            ),
+        )
+        val dark = DriveDashboardPresentation.heroPalette(
+            darkColorScheme(
+                primary = CloudBlue300,
+                onPrimary = Navy950,
+                secondary = Teal300,
+            ),
+        )
+
+        assertEquals(DriveHeroPalette(CloudBlue600, Teal600, Color.White), light)
+        assertEquals(DriveHeroPalette(CloudBlue300, Teal300, Navy950), dark)
+    }
+
     @Test
     fun transfersAreSeparatedIntoActiveAndHistorySections() {
         val tasks = TransferStatus.entries.mapIndexed { index, status ->
