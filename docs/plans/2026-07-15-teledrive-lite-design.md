@@ -45,7 +45,7 @@ TeleDrive Lite 是一个原生 Android 客户端。它只调用 Telegram 官方 
 
 ## 5. 上传、下载与完整性
 
-上传 Worker 通过 ContentResolver 流式读取 URI，以 64 KiB 缓冲更新原文件 SHA-256，并按可配置上限切成默认 18 MiB 的块。每块边读边加密到应用缓存临时文件，上传完成立刻删除临时文件；原文件从不整体载入内存。块消息成功后立即保存 message id、file id、nonce 和大小，但文件仍不是正式索引成员。全部块完成且新索引确认置顶后，文件才变为 `AVAILABLE`。
+上传 Worker 通过 ContentResolver 流式读取 URI，以 64 KiB 缓冲更新原文件 SHA-256，并按可配置上限切成默认 19 MiB 的块。每块边读边加密到应用缓存临时文件，上传完成立刻删除临时文件；原文件从不整体载入内存。块消息成功后立即保存 message id、file id、nonce 和大小，但文件仍不是正式索引成员。全部块完成且新索引确认置顶后，文件才变为 `AVAILABLE`。
 
 下载 Worker 按块顺序调用 `getFile` 并流式下载密文。每块先在缓存中完成 GCM 验证，再追加到重建临时文件；所有块完成后校验 SHA-256，只有校验成功才复制到用户选择的 SAF URI。失败或取消不会把不完整输出标记为成功，并清理应用临时文件。
 

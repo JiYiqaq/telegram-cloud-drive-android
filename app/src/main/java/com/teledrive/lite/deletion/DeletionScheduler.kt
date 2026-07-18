@@ -22,25 +22,41 @@ class DeletionScheduler(
         start.canceledWorkRequestIds.forEach { workId ->
             runCatching { workManager.cancelWorkById(UUID.fromString(workId)) }
         }
-        val request = OneTimeWorkRequestBuilder<DeletionWorker>()
-            .setInputData(Data.Builder().putString(DeletionWorker.KEY_FILE_ID, fileId).build())
-            .setConstraints(
-                Constraints.Builder()
-                    .setRequiredNetworkType(NetworkType.CONNECTED)
-                    .build(),
+        val operation = try {
+            val request = OneTimeWorkRequestBuilder<DeletionWorker>()
+                .setInputData(Data.Builder().putString(DeletionWorker.KEY_FILE_ID, fileId).build())
+                .setConstraints(
+                    Constraints.Builder()
+                        .setRequiredNetworkType(NetworkType.CONNECTED)
+                        .build(),
+                )
+                .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
+                .addTag(DELETION_TAG)
+                .addTag("delete:$fileId")
+                .build()
+            workManager.enqueueUniqueWork(
+                "safe-delete:$fileId",
+                ExistingWorkPolicy.REPLACE,
+                request,
             )
-            .setBackoffCriteria(BackoffPolicy.EXPONENTIAL, 30, TimeUnit.SECONDS)
-            .addTag(DELETION_TAG)
-            .addTag("delete:$fileId")
-            .build()
-        workManager.enqueueUniqueWork(
-            "safe-delete:$fileId",
-            ExistingWorkPolicy.REPLACE,
-            request,
+        } catch (error: Exception) {
+            try {
+                DeletionWorkPersistence.restore {
+                    repository.markFileDeletionRecoverable(fileId, ERROR_ENQUEUE_FAILED)
+                }
+            } catch (recoveryError: Exception) {
+                error.addSuppressed(recoveryError)
+            }
+            throw error
+        }
+        DeletionWorkPersistence.await(
+            waitForPersistence = { operation.result.get(); Unit },
+            recover = { repository.markFileDeletionRecoverable(fileId, ERROR_ENQUEUE_FAILED) },
         )
     }
 
     companion object {
         const val DELETION_TAG = "teledrive_safe_deletion"
+        private const val ERROR_ENQUEUE_FAILED = "DELETE_WORK_NOT_ENQUEUED"
     }
 }

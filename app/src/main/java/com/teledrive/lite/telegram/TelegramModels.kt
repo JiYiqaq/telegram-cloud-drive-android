@@ -64,7 +64,7 @@ data class RemoteFile(
 )
 
 object TelegramCloudLimits {
-    const val DEFAULT_CHUNK_SIZE_BYTES: Long = 18L * 1024L * 1024L
+    const val DEFAULT_CHUNK_SIZE_BYTES: Long = 19L * 1024L * 1024L
     const val MAX_DOWNLOADABLE_ENCRYPTED_BYTES: Long = 20_000_000L
     const val GCM_TAG_BYTES: Long = 16L
 

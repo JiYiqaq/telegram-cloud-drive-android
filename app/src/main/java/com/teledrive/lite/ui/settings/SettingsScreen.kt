@@ -101,10 +101,14 @@ fun SettingsRoute(
             SettingsButton("从置顶索引恢复", busy, onRecovery)
 
             Text("默认分块大小", style = MaterialTheme.typography.titleMedium)
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                listOf(4, 8, 12, 18).forEach { mib ->
-                    TextButton(onClick = { viewModel.setChunkSize(mib * 1024 * 1024) }) {
-                        Text(if (chunkSize == mib * 1024 * 1024) "[$mib MiB]" else "$mib MiB")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                SettingsPresentation.chunkSizeRows().forEach { row ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { mib ->
+                            TextButton(onClick = { viewModel.setChunkSize(mib * 1024 * 1024) }) {
+                                Text(if (chunkSize == mib * 1024 * 1024) "[$mib MiB]" else "$mib MiB")
+                            }
+                        }
                     }
                 }
             }

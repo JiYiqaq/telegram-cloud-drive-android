@@ -14,6 +14,7 @@ import com.teledrive.lite.R
 import com.teledrive.lite.TeleDriveApplication
 import com.teledrive.lite.telegram.TelegramApiException
 import com.teledrive.lite.telegram.TelegramFailure
+import kotlinx.coroutines.CancellationException
 
 data class DeletionServices(
     val coordinator: SafeDeletionCoordinator,
@@ -26,13 +27,13 @@ class DeletionWorker(
     override suspend fun doWork(): Result {
         val fileId = inputData.getString(KEY_FILE_ID)
             ?: return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_INVALID_FILE))
-        val services = (applicationContext as TeleDriveApplication)
-            .container
+        val container = (applicationContext as TeleDriveApplication).container
+        val services = container
             .createDeletionServices()
-            ?: return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_SETUP_REQUIRED))
-        createNotificationChannel()
-        setForeground(notification(fileId))
+            ?: return terminalFailure(fileId, ERROR_SETUP_REQUIRED)
         return try {
+            createNotificationChannel()
+            setForeground(notification(fileId))
             when (val outcome = services.coordinator.execute(fileId)) {
                 DeletionOutcome.Completed -> Result.success()
                 is DeletionOutcome.PartiallyDeleted -> Result.failure(
@@ -42,16 +43,24 @@ class DeletionWorker(
                     ),
                 )
             }
+        } catch (error: CancellationException) {
+            throw error
         } catch (error: TelegramApiException) {
             val retryAfter = (error.failure as? TelegramFailure.Api)?.retryAfterSeconds
             if (error.failure is TelegramFailure.Network || retryAfter?.let { it > 0 } == true) {
                 Result.retry()
             } else {
-                Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_INDEX_PUBLICATION_FAILED))
+                terminalFailure(fileId, ERROR_INDEX_PUBLICATION_FAILED)
             }
         } catch (_: Exception) {
-            Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_DELETION_FAILED))
+            terminalFailure(fileId, ERROR_DELETION_FAILED)
         }
+    }
+
+    private suspend fun terminalFailure(fileId: String, errorCode: String): Result {
+        val repository = (applicationContext as TeleDriveApplication).container.fileRepository
+        runCatching { repository.markFileDeletionRecoverable(fileId, errorCode) }
+        return Result.failure(workDataOf(KEY_ERROR_CODE to errorCode))
     }
 
     private fun notification(fileId: String): ForegroundInfo {

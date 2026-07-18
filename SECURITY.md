@@ -1,6 +1,6 @@
 # Security policy
 
-TeleDrive Lite `0.1.0-alpha` is pre-release software and has not undergone a formal third-party security audit.
+TeleDrive Lite `0.1.2-alpha` is pre-release software and has not undergone a formal third-party security audit.
 
 ## Reporting a vulnerability
 

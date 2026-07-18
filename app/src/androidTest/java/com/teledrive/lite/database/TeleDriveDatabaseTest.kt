@@ -304,6 +304,44 @@ class TeleDriveDatabaseTest {
             database.indexStateDao().get(IndexStateEntity.SINGLETON_ID)?.syncStatus,
         )
 
+        assertEquals(
+            emptyList<String>(),
+            repository.observeDirectory("root", SortMode.NAME, SortDirection.ASCENDING)
+                .first()
+                .entries
+                .map { it.id },
+        )
+        assertEquals(true, repository.markFileDeletionRecoverable("file-1", "WORK_NOT_ENQUEUED"))
+        assertEquals(FileStatus.PARTIALLY_DELETED, database.fileDao().getById("file-1")?.status)
+        val recoveredOperation = checkNotNull(
+            database.pendingOperationDao().getById(deletionStart.operationId),
+        )
+        assertEquals(PendingOperationStatus.FAILED, recoveredOperation.status)
+        assertEquals(1, recoveredOperation.attempt)
+        assertEquals("WORK_NOT_ENQUEUED", recoveredOperation.errorCode)
+        assertEquals(
+            listOf("file-1"),
+            repository.observeDirectory("root", SortMode.NAME, SortDirection.ASCENDING)
+                .first()
+                .entries
+                .map { it.id },
+        )
+
+        repository.beginFileDeletion("file-1")
+        assertEquals(FileStatus.DELETING, database.fileDao().getById("file-1")?.status)
+        val resumedOperation = checkNotNull(
+            database.pendingOperationDao().getById(deletionStart.operationId),
+        )
+        assertEquals(PendingOperationStatus.PENDING, resumedOperation.status)
+        assertNull(resumedOperation.errorCode)
+        assertEquals(
+            emptyList<String>(),
+            repository.observeDirectory("root", SortMode.NAME, SortDirection.ASCENDING)
+                .first()
+                .entries
+                .map { it.id },
+        )
+
         val confirmedSnapshot = CloudCacheSnapshot(
             folders = listOf(FolderEntity("root", "我的云盘", null, now, now)),
             files = emptyList(),

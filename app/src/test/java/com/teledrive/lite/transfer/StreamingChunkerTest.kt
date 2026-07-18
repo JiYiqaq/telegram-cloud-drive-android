@@ -60,7 +60,7 @@ class StreamingChunkerTest {
 
     @Test
     fun chunkSizeIsLimitedToEncryptedTelegramDownloadBoundary() {
-        assertEquals(18 * 1024 * 1024, StreamingChunker.DEFAULT_CHUNK_SIZE_BYTES)
+        assertEquals(19 * 1024 * 1024, StreamingChunker.DEFAULT_CHUNK_SIZE_BYTES)
         assertTrue(
             StreamingChunker.DEFAULT_CHUNK_SIZE_BYTES + CryptoEngine.ENVELOPE_OVERHEAD_BYTES <
                 StreamingChunker.MAX_ENCRYPTED_CHUNK_BYTES,

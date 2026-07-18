@@ -419,6 +419,20 @@ class FileRepository(
                 ) {
                     fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
                 }
+                if (file.status == FileStatus.PARTIALLY_DELETED) {
+                    val transition = DeletionFailureRecovery.retryTransition(file.status)
+                    if (fileDao.updateStatus(fileId, transition.fileStatus, now) != 1) {
+                        fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+                    }
+                    pendingOperationDao.upsert(
+                        operation.copy(
+                            status = transition.operationStatus,
+                            nextRetryAtEpochMillis = null,
+                            errorCode = transition.errorCode,
+                            updatedAtEpochMillis = now,
+                        ),
+                    )
+                }
                 return@withTransaction FileDeletionStart(
                     operationId,
                     activeTasks.mapNotNull { it.workRequestId },
@@ -468,6 +482,47 @@ class FileRepository(
             }
             indexStateDao.upsert(indexState.copy(syncStatus = IndexSyncStatus.DIRTY))
             FileDeletionStart(operationId, activeTasks.mapNotNull { it.workRequestId })
+        }
+    }
+
+    suspend fun markFileDeletionRecoverable(
+        fileId: String,
+        errorCode: String,
+    ): Boolean = mutationMutex.withLock {
+        database.withTransaction {
+            val file = fileDao.getById(fileId) ?: return@withTransaction false
+            if (file.status !in FINAL_DELETION_STATES) return@withTransaction false
+            val operationId = deletionOperationId(fileId)
+            val operation = pendingOperationDao.getById(operationId)
+                ?: fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
+            if (
+                operation.type != PendingOperationType.DELETE ||
+                operation.targetId != fileId
+            ) {
+                fail(DriveRepositoryFailure.DELETE_OPERATION_REQUIRED)
+            }
+            val transition = DeletionFailureRecovery.transition(
+                currentFileStatus = file.status,
+                currentAttempt = operation.attempt,
+                errorCode = errorCode,
+            )
+            val now = clock()
+            if (fileDao.updateStatus(fileId, transition.fileStatus, now) != 1) {
+                fail(DriveRepositoryFailure.ENTRY_NOT_FOUND)
+            }
+            pendingOperationDao.upsert(
+                operation.copy(
+                    status = transition.operationStatus,
+                    attempt = transition.attempt,
+                    nextRetryAtEpochMillis = null,
+                    errorCode = transition.errorCode,
+                    updatedAtEpochMillis = now,
+                ),
+            )
+            val indexState = indexStateDao.get(IndexStateEntity.SINGLETON_ID)
+                ?: fail(DriveRepositoryFailure.INDEX_CONFIRMATION_REQUIRED)
+            indexStateDao.upsert(indexState.copy(syncStatus = IndexSyncStatus.DIRTY))
+            true
         }
     }
 

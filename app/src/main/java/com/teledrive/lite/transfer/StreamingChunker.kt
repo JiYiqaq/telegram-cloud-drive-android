@@ -8,7 +8,7 @@ object StreamingChunker {
     const val MAX_ENCRYPTED_CHUNK_BYTES: Int = 20_000_000
     const val MAX_PLAINTEXT_CHUNK_SIZE_BYTES: Int =
         MAX_ENCRYPTED_CHUNK_BYTES - CryptoEngine.ENVELOPE_OVERHEAD_BYTES - 1
-    const val DEFAULT_CHUNK_SIZE_BYTES: Int = 18 * 1024 * 1024
+    const val DEFAULT_CHUNK_SIZE_BYTES: Int = 19 * 1024 * 1024
 
     fun forEachChunk(
         input: InputStream,

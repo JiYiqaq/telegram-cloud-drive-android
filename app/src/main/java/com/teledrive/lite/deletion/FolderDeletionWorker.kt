@@ -9,6 +9,7 @@ import com.teledrive.lite.TeleDriveApplication
 import com.teledrive.lite.repository.FileRepository
 import com.teledrive.lite.sync.IndexAtomicUpdater
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
 
 data class FolderDeletionServices(
     val repository: FileRepository,
@@ -25,10 +26,15 @@ class FolderDeletionWorker(
             ?: return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_INVALID_FOLDER))
         val container = (applicationContext as TeleDriveApplication).container
         val services = container.createFolderDeletionServices()
-            ?: return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_SETUP_REQUIRED))
+        if (services == null) {
+            restoreDeletionFiles(container.fileRepository, folderId, ERROR_SETUP_REQUIRED)
+            return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_SETUP_REQUIRED))
+        }
+        var activeFileId: String? = null
         return try {
             val plan = services.repository.planFolderDeletion(folderId, confirmed = true)
             for (fileId in plan.fileIds) {
+                activeFileId = fileId
                 val start = services.repository.beginFileDeletion(fileId)
                 start.canceledWorkRequestIds.forEach { id ->
                     runCatching {
@@ -37,14 +43,35 @@ class FolderDeletionWorker(
                     }
                 }
                 if (services.coordinator.execute(fileId) is DeletionOutcome.PartiallyDeleted) {
+                    activeFileId = null
                     return Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_PARTIAL_DELETE))
                 }
+                activeFileId = null
             }
             plan.folderIdsInDeletionOrder.forEach { services.repository.deleteEmptyFolder(it) }
             services.updater.resumeOrStart()
             Result.success()
+        } catch (error: CancellationException) {
+            throw error
         } catch (_: Exception) {
+            activeFileId?.let { fileId ->
+                runCatching {
+                    services.repository.markFileDeletionRecoverable(fileId, ERROR_FOLDER_DELETE_FAILED)
+                }
+            }
             Result.failure(workDataOf(KEY_ERROR_CODE to ERROR_FOLDER_DELETE_FAILED))
+        }
+    }
+
+    private suspend fun restoreDeletionFiles(
+        repository: FileRepository,
+        folderId: String,
+        errorCode: String,
+    ) {
+        runCatching {
+            repository.planFolderDeletion(folderId, confirmed = true).fileIds.forEach { fileId ->
+                runCatching { repository.markFileDeletionRecoverable(fileId, errorCode) }
+            }
         }
     }
 

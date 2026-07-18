@@ -20,7 +20,7 @@ class TelegramRedactionTest {
 
     @Test
     fun cloudLimitsKeepDefaultChunkBelowDownloadBoundary() {
-        assertEquals(18L * 1024L * 1024L, TelegramCloudLimits.DEFAULT_CHUNK_SIZE_BYTES)
+        assertEquals(19L * 1024L * 1024L, TelegramCloudLimits.DEFAULT_CHUNK_SIZE_BYTES)
         assertEquals(20_000_000L, TelegramCloudLimits.MAX_DOWNLOADABLE_ENCRYPTED_BYTES)
         assertTrue(
             TelegramCloudLimits.isEncryptedChunkSizeSafe(
