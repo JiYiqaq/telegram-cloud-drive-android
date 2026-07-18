@@ -167,7 +167,7 @@ class HomeViewModel(
         viewModelScope.launch {
             message.value = try {
                 transferRepository.dismissTerminal(taskId)
-                "已删除传输记录；云端文件不受影响"
+                DriveDashboardPresentation.dismissedTransferMessage()
             } catch (_: Exception) {
                 "进行中的任务不能直接删除，请先取消传输"
             }
@@ -177,11 +177,7 @@ class HomeViewModel(
     fun clearTransferHistory() {
         viewModelScope.launch {
             val removed = transferRepository.clearTerminalHistory()
-            message.value = if (removed == 0) {
-                "没有可清理的传输记录"
-            } else {
-                "已清理 $removed 条传输记录；云端文件不受影响"
-            }
+            message.value = DriveDashboardPresentation.clearedHistoryMessage(removed)
         }
     }
 
