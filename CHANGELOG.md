@@ -2,6 +2,25 @@
 
 All notable changes follow semantic versioning. This project is pre-release software.
 
+## [0.1.3-alpha] - 2026-07-18
+
+### Added
+
+- Added a drive-style files/transfers/settings navigation structure
+- Added per-record dismissal and one-tap cleanup for safe terminal transfer history
+- Added actionable cleanup guidance for failed or canceled uploads with remote orphan chunks
+
+### Changed
+
+- Rebuilt the files page with a branded dashboard header, rounded search, quick upload/folder actions, compact file rows, and expandable add menu
+- Split active transfers and history into a dedicated transfer center
+- Refreshed the application palette with cloud blue and teal security accents
+
+### Fixed
+
+- Automatically synchronize a dirty pinned index and retry once when deletion is requested immediately after a successful upload
+- Keep failed upload records until remote orphan chunks are cleaned so cleanup metadata cannot be lost
+
 ## [0.1.2-alpha] - 2026-07-18
 
 ### Changed
