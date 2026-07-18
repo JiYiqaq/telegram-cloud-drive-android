@@ -33,7 +33,7 @@ import kotlinx.coroutines.launch
 @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
 class HomeViewModel(
     private val fileRepository: FileRepository,
-    transferRepository: TransferRepository,
+    private val transferRepository: TransferRepository,
     private val uploadScheduler: UploadScheduler,
     private val downloadScheduler: DownloadScheduler,
     private val deletionScheduler: DeletionScheduler,
@@ -159,6 +159,28 @@ class HomeViewModel(
                 "下载已从头重新加入队列"
             } catch (_: Exception) {
                 "此任务无法重试，请重新选择文件"
+            }
+        }
+    }
+
+    fun dismissTransfer(taskId: String) {
+        viewModelScope.launch {
+            message.value = try {
+                transferRepository.dismissTerminal(taskId)
+                "已删除传输记录；云端文件不受影响"
+            } catch (_: Exception) {
+                "进行中的任务不能直接删除，请先取消传输"
+            }
+        }
+    }
+
+    fun clearTransferHistory() {
+        viewModelScope.launch {
+            val removed = transferRepository.clearTerminalHistory()
+            message.value = if (removed == 0) {
+                "没有可清理的传输记录"
+            } else {
+                "已清理 $removed 条传输记录；云端文件不受影响"
             }
         }
     }

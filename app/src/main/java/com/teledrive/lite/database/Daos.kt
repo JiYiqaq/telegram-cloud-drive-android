@@ -289,6 +289,15 @@ interface TransferTaskDao {
 
     @Query("DELETE FROM transfer_tasks WHERE id = :id")
     suspend fun deleteById(id: String): Int
+
+    @Query(
+        "DELETE FROM transfer_tasks WHERE id = :id " +
+            "AND status IN ('SUCCESS', 'FAILED', 'CANCELED')",
+    )
+    suspend fun deleteTerminalById(id: String): Int
+
+    @Query("DELETE FROM transfer_tasks WHERE status IN ('SUCCESS', 'FAILED', 'CANCELED')")
+    suspend fun deleteTerminalHistory(): Int
 }
 
 @Dao

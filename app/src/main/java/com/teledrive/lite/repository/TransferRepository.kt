@@ -35,6 +35,25 @@ class TransferRepository(
 
     fun observeActive(): Flow<List<TransferTaskEntity>> = taskDao.observeActive()
 
+    suspend fun dismissTerminal(taskId: String) = mutationMutex.withLock {
+        database.withTransaction {
+            val task = taskDao.getById(taskId)
+                ?: fail(TransferRepositoryFailure.TASK_NOT_FOUND)
+            if (!TransferHistoryPolicy.canDismiss(task.status)) {
+                fail(TransferRepositoryFailure.INVALID_STATE)
+            }
+            if (taskDao.deleteTerminalById(taskId) != 1) {
+                fail(TransferRepositoryFailure.TASK_NOT_FOUND)
+            }
+        }
+    }
+
+    suspend fun clearTerminalHistory(): Int = mutationMutex.withLock {
+        database.withTransaction {
+            taskDao.deleteTerminalHistory()
+        }
+    }
+
     suspend fun enqueue(
         fileId: String,
         type: TransferType,
