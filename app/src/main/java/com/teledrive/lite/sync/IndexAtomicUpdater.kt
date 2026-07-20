@@ -1,7 +1,5 @@
 package com.teledrive.lite.sync
 
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
 
 /** The locally committed cloud-index pointer. All three fields change atomically. */
@@ -190,10 +188,13 @@ class IndexAtomicUpdater(
     private val localStore: IndexLocalStore,
     private val candidateFactory: IndexCandidateFactory,
     private val operationIdFactory: () -> String,
+    private val singleFlight: IndexUpdateSingleFlight = IndexUpdateSingleFlight(),
 ) {
-    private val mutex = Mutex()
+    suspend fun resumeOrStart(): IndexUpdateOutcome.Completed = singleFlight.run {
+        resumeOrStartOnce()
+    }
 
-    suspend fun resumeOrStart(): IndexUpdateOutcome.Completed = mutex.withLock {
+    private suspend fun resumeOrStartOnce(): IndexUpdateOutcome.Completed {
         var journal = localStore.readJournal() ?: createJournal()
 
         while (journal.phase != IndexUpdatePhase.COMMITTED) {
@@ -205,7 +206,7 @@ class IndexAtomicUpdater(
                 IndexUpdatePhase.COMMITTED -> journal
             }
         }
-        finishCommitted(journal)
+        return finishCommitted(journal)
     }
 
     private suspend fun createJournal(): IndexUpdateJournal {

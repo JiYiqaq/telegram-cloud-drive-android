@@ -2,6 +2,16 @@
 
 All notable changes follow semantic versioning. This project is pre-release software.
 
+## [0.1.5-alpha] - 2026-07-20
+
+### Fixed
+
+- Allow users to submit consecutive single-file deletions while earlier deletion work is still pending
+- Keep delete-only dirty indexes safe for additional deletion requests while rejecting unrelated unsynchronized mutations
+- Accept the exact cloud-index pointer already committed by the atomic updater during final local cleanup
+- Prevent completed background deletions from being incorrectly restored as failed items
+- Coalesce concurrent index recovery calls and safely hand work to a waiter if the active owner is canceled
+
 ## [0.1.4-alpha] - 2026-07-18
 
 ### Changed

@@ -247,7 +247,7 @@ class TeleDriveDatabaseTest {
     }
 
     @Test
-    fun repositoryStartsTwoFileDeletionsFromOneStableIndexTransaction() = runBlocking {
+    fun repositoryStartsConsecutiveFileDeletionsBeforeTheFirstOneFinishes() = runBlocking {
         val now = 1_700_000_000_000L
         val repository = FileRepository(database = database, clock = { now })
         database.folderDao().upsert(FolderEntity("root", "我的云盘", null, now, now))
@@ -280,7 +280,10 @@ class TeleDriveDatabaseTest {
             ),
         )
 
-        val starts = repository.beginFileDeletions(listOf("file-1", "file-2"))
+        val starts = listOf(
+            repository.beginFileDeletion("file-1"),
+            repository.beginFileDeletion("file-2"),
+        )
 
         assertEquals(2, starts.size)
         assertEquals(
@@ -288,6 +291,61 @@ class TeleDriveDatabaseTest {
             starts.map { it.fileId }.toSet(),
         )
         starts.forEach { start ->
+            assertEquals(
+                4L,
+                database.pendingOperationDao().getById(start.operationId)?.baseRevision,
+            )
+            assertEquals(FileStatus.DELETING, database.fileDao().getById(start.fileId)?.status)
+        }
+        assertEquals(
+            IndexSyncStatus.DIRTY,
+            database.indexStateDao().get(IndexStateEntity.SINGLETON_ID)?.syncStatus,
+        )
+    }
+
+    @Test
+    fun repositoryAppendsBatchDeletionToAnExistingDeleteOnlyDirtyIndex() = runBlocking {
+        val now = 1_700_000_000_000L
+        val repository = FileRepository(database = database, clock = { now })
+        database.folderDao().upsert(FolderEntity("root", "我的云盘", null, now, now))
+        listOf("file-1", "file-2", "file-3").forEachIndexed { index, fileId ->
+            database.fileDao().upsert(testFile(fileId, "root", FileStatus.DOWNLOADING, now))
+            database.chunkDao().upsert(
+                ChunkEntity(
+                    "chunk-$fileId",
+                    fileId,
+                    0,
+                    51L + index,
+                    "remote-$fileId",
+                    ByteArray(12),
+                    17,
+                    ChunkUploadStatus.UPLOADED,
+                ),
+            )
+        }
+        database.indexStateDao().upsert(
+            IndexStateEntity(
+                id = IndexStateEntity.SINGLETON_ID,
+                formatVersion = 1,
+                revision = 4,
+                rootFolderId = "root",
+                currentIndexMessageId = 90,
+                previousIndexMessageId = 89,
+                currentIndexFileId = "index-file",
+                lastSyncedAtEpochMillis = now,
+                syncStatus = IndexSyncStatus.SYNCED,
+            ),
+        )
+
+        val first = repository.beginFileDeletion("file-1")
+        val appended = repository.beginFileDeletions(listOf("file-2", "file-3"))
+
+        assertEquals("file-1", first.fileId)
+        assertEquals(
+            setOf("file-2", "file-3"),
+            appended.map { it.fileId }.toSet(),
+        )
+        listOf(first).plus(appended).forEach { start ->
             assertEquals(
                 4L,
                 database.pendingOperationDao().getById(start.operationId)?.baseRevision,
@@ -487,6 +545,10 @@ class TeleDriveDatabaseTest {
         }
         assertEquals(DriveRepositoryFailure.INVALID_CLOUD_SNAPSHOT, conflictingNameError.failure)
         assertNotNull(database.fileDao().getById("file-1"))
+
+        database.indexStateDao().upsert(
+            confirmedSnapshot.indexState.copy(syncStatus = IndexSyncStatus.DIRTY),
+        )
 
         repository.finalizeFileDeletion("file-1", confirmedSnapshot)
         assertNull(database.fileDao().getById("file-1"))

@@ -14,8 +14,8 @@ android {
         applicationId = "com.teledrive.lite"
         minSdk = 28
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.1.4-alpha"
+        versionCode = 6
+        versionName = "0.1.5-alpha"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

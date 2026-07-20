@@ -451,9 +451,13 @@ class FileRepository(
                 fail(DriveRepositoryFailure.REMOTE_DELETE_INCOMPLETE)
             }
             val indexState = indexStateDao.get(IndexStateEntity.SINGLETON_ID)
+            val pendingOperationTypes = pendingOperationDao.getAll().map { it.type }
             if (
                 indexState == null ||
-                indexState.syncStatus != IndexSyncStatus.SYNCED ||
+                !DeletionIndexAdmissionPolicy.canStart(
+                    indexState.syncStatus,
+                    pendingOperationTypes,
+                ) ||
                 indexState.currentIndexMessageId == null ||
                 indexState.currentIndexFileId.isNullOrBlank() ||
                 indexState.lastSyncedAtEpochMillis == null
@@ -500,11 +504,15 @@ class FileRepository(
                 }
                 val needsStableIndex = files.any { it.status !in FINAL_DELETION_STATES }
                 val indexState = indexStateDao.get(IndexStateEntity.SINGLETON_ID)
+                val pendingOperationTypes = pendingOperationDao.getAll().map { it.type }
                 if (
                     needsStableIndex &&
                     (
                         indexState == null ||
-                            indexState.syncStatus != IndexSyncStatus.SYNCED ||
+                            !DeletionIndexAdmissionPolicy.canStart(
+                                indexState.syncStatus,
+                                pendingOperationTypes,
+                            ) ||
                             indexState.currentIndexMessageId == null ||
                             indexState.currentIndexFileId.isNullOrBlank() ||
                             indexState.lastSyncedAtEpochMillis == null
@@ -788,13 +796,11 @@ class FileRepository(
                 if (
                     operation.type != PendingOperationType.DELETE ||
                     operation.targetId != fileId ||
-                    baseRevision > currentIndex.revision ||
-                    confirmedSnapshot.indexState.revision - currentIndex.revision != 1L ||
-                    confirmedSnapshot.indexState.previousIndexMessageId !=
-                    currentIndex.currentIndexMessageId ||
-                    confirmedSnapshot.indexState.currentIndexMessageId ==
-                    currentIndex.currentIndexMessageId ||
-                    confirmedSnapshot.indexState.currentIndexFileId == currentIndex.currentIndexFileId
+                    !DeletionIndexConfirmationPolicy.isConfirmed(
+                        operationBaseRevision = baseRevision,
+                        current = currentIndex,
+                        confirmed = confirmedSnapshot.indexState,
+                    )
                 ) {
                     fail(DriveRepositoryFailure.INDEX_CONFIRMATION_REQUIRED)
                 }

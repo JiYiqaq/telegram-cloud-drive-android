@@ -45,6 +45,7 @@ import com.teledrive.lite.sync.EncryptedIndexCandidateFactory
 import com.teledrive.lite.sync.FileIndexCandidateArtifactStore
 import com.teledrive.lite.sync.FileRepositoryIndexCacheReplacer
 import com.teledrive.lite.sync.IndexAtomicUpdater
+import com.teledrive.lite.sync.IndexUpdateSingleFlight
 import com.teledrive.lite.sync.IndexRecoveryService
 import com.teledrive.lite.sync.RoomIndexLocalStore
 import com.teledrive.lite.sync.RoomIndexSnapshotSource
@@ -95,6 +96,7 @@ class AppContainer(context: Context) {
     val deletionScheduler = DeletionScheduler(applicationContext, fileRepository)
     val orphanCleanupScheduler = OrphanCleanupScheduler(applicationContext)
     val folderDeletionScheduler = FolderDeletionScheduler(applicationContext)
+    private val indexUpdateSingleFlight = IndexUpdateSingleFlight()
 
     private val secureValues = SharedPreferencesStringValueStore(
         applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE),
@@ -162,6 +164,7 @@ class AppContainer(context: Context) {
                 localStore = RoomIndexLocalStore(database),
                 candidateFactory = candidateFactory,
                 operationIdFactory = { UUID.randomUUID().toString() },
+                singleFlight = indexUpdateSingleFlight,
             ),
             recovery = IndexRecoveryService(
                 remote = remote,
